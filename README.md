@@ -291,9 +291,12 @@ For complete setup instructions including API key configuration, workflow import
 
 | Document | Description |
 |----------|-------------|
+| [Documentation Index](docs/README.md) | Full documentation map and quick links |
 | [Setup Guide](docs/setup.md) | Prerequisites, API keys, workflow creation order |
 | [Database Schema](docs/schema.md) | Migration reference and table documentation |
 | [Configuration Reference](docs/configuration.md) | soul.md structure, credentials, environment variables |
+| [Development Guide](DEVELOPMENT.md) | Local development environment setup |
+| [Contributing Guide](CONTRIBUTING.md) | How to contribute, PR process, coding standards |
 | [Development History](development/) | Build process from Phase 1 through Phase 6 |
 | [Workflow Exports](workflows/) | All 27 sanitized n8n workflow JSONs |
 
