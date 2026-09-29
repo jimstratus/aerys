@@ -1,0 +1,127 @@
+{
+  "name": "06-03 Central Error Handler",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "error-trigger-06",
+      "name": "Error Trigger",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        -100,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const workflow = $json.workflow || {};\nconst execution = $json.execution || {};\nconst error = execution.error || {};\n\nconst errorDetails = {\n  workflow_name: workflow.name || 'Unknown',\n  workflow_id: workflow.id || 'Unknown',\n  last_node: execution.lastNodeExecuted || 'Unknown',\n  error_message: error.message || 'No error message',\n  execution_id: execution.id || 'Unknown',\n  timestamp: new Date().toISOString()\n};\n\n// Discord message for #echoes\nconst discordMessage = [\n  '**Aerys Error**',\n  `Workflow: ${errorDetails.workflow_name}`,\n  `Node: ${errorDetails.last_node}`,\n  `Error: ${errorDetails.error_message}`,\n  `Exec: ${errorDetails.execution_id}`,\n].join('\\n');\n\nreturn [{json: {\n  ...errorDetails,\n  discord_message: discordMessage,\n  echoes_channel_id: 'YOUR_ERROR_CHANNEL_ID', // #echoes — hardcoded, no $vars\n  audit_details: JSON.stringify({\n    workflow_name: errorDetails.workflow_name,\n    workflow_id: errorDetails.workflow_id,\n    last_node: errorDetails.last_node,\n    error_message: errorDetails.error_message,\n    execution_id: errorDetails.execution_id,\n    timestamp: errorDetails.timestamp\n  })\n}}];"
+      },
+      "id": "format-error-06",
+      "name": "Format Error",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        140,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO audit_log (action, details) VALUES ('workflow_error', $1::jsonb)",
+        "options": {
+          "queryReplacement": "={{ [$json.audit_details] }}"
+        }
+      },
+      "id": "log-audit-06",
+      "name": "Log to Audit",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        380,
+        200
+      ],
+      "continueOnFail": true,
+      "credentials": {
+        "postgres": {
+          "id": "YOUR_POSTGRES_CREDENTIAL_ID",
+          "name": "Aerys DB (aerys)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://discord.com/api/v10/channels/{{ $json.echoes_channel_id }}/messages",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "discordBotApi",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({content: $json.discord_message}) }}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "send-echoes-06",
+      "name": "Send to Echoes",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        380,
+        420
+      ],
+      "continueOnFail": true,
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "credentials": {
+        "discordBotApi": {
+          "id": "YOUR_DISCORD_BOT_CREDENTIAL_ID",
+          "name": "Discord Bot account"
+        }
+      },
+      "notes": "Sends error notification to #echoes Discord channel."
+    }
+  ],
+  "connections": {
+    "Error Trigger": {
+      "main": [
+        [
+          {
+            "node": "Format Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Error": {
+      "main": [
+        [
+          {
+            "node": "Log to Audit",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Send to Echoes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  },
+  "staticData": null,
+  "id": "06-03-central-error"
+}

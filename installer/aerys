@@ -1,0 +1,478 @@
+#!/usr/bin/env bash
+# Aerys installer entry point.
+#
+# Flags:
+#   --help                  show usage
+#   --check-only            run prerequisite checks and exit (no install)
+#   --credentials-only      run the credential wizard and exit (writes .env only)
+#   --compose-only          regenerate docker-compose.yml from existing .env and exit
+#   --import-workflows      import workflows into a running n8n instance and exit
+#                           (also installs community nodes first). Uses --api-key
+#                           if given; otherwise reads N8N_API_KEY from .env; else
+#                           prompts (hidden) and persists a validated key to .env.
+#   --install-community-nodes  install required n8n community packages into a
+#                              running n8n container (automatically called by
+#                              --import-workflows; standalone flag for re-runs)
+#   --import-dry-run        validate workflow JSONs and credential plan; do not contact n8n
+#   --init-db               stage/run database migrations from the existing .env and exit
+#   --verify-db             verify aerys schema is present and exit
+#   --config-only           generate soul.md + models.json + config.json and exit
+#   --health-check          run end-to-end health checks on a running install
+#   --api-key KEY           n8n API key (Settings → API in the n8n UI)
+#   --n8n-url URL           n8n base URL (default: http://localhost:5678)
+#   --env-path PATH         where to write/read the .env (default: ./.env)
+#   --deploy-dir PATH       deployment directory for data/config/compose (default: .)
+#   --uninstall             tear down deployment (prompts before destroying data)
+#   --yes                   skip interactive prompts (use with --uninstall for automation)
+#   --quiet                 suppress banner + progress output (errors still print)
+#
+# Exit codes:
+#   0  success
+#   1  general failure or cancelled by user
+#   2  prerequisite check failed (missing deps / ports / disk)
+
+set -euo pipefail
+IFS=$'\n\t'
+
+# Resolve script directory (follows symlinks)
+INSTALLER_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+LIB_DIR="${INSTALLER_DIR}/lib"
+
+# Load modules
+# shellcheck source=lib/logging.sh
+source "${LIB_DIR}/logging.sh"
+# shellcheck source=lib/banner.sh
+source "${LIB_DIR}/banner.sh"
+# shellcheck source=lib/prereqs.sh
+source "${LIB_DIR}/prereqs.sh"
+# shellcheck source=lib/prompt.sh
+source "${LIB_DIR}/prompt.sh"
+# shellcheck source=lib/credentials.sh
+source "${LIB_DIR}/credentials.sh"
+# shellcheck source=lib/compose.sh
+source "${LIB_DIR}/compose.sh"
+# shellcheck source=lib/workflows.sh
+source "${LIB_DIR}/workflows.sh"
+# shellcheck source=lib/community_nodes.sh
+source "${LIB_DIR}/community_nodes.sh"
+# shellcheck source=lib/db_init.sh
+source "${LIB_DIR}/db_init.sh"
+# shellcheck source=lib/config.sh
+source "${LIB_DIR}/config.sh"
+# shellcheck source=lib/healthcheck.sh
+source "${LIB_DIR}/healthcheck.sh"
+# shellcheck source=lib/uninstall.sh
+source "${LIB_DIR}/uninstall.sh"
+# shellcheck source=lib/cli.sh
+source "${LIB_DIR}/cli.sh"
+# shellcheck source=lib/discord-watchdog.sh
+source "${LIB_DIR}/discord-watchdog.sh"
+
+usage() {
+  cat <<EOF
+Aerys installer
+
+Usage:
+  ./aerys [SUBCOMMAND] [OPTIONS]     # recommended
+  ./aerys [OPTIONS]                  # flag-based (backward compat)
+
+Options:
+  --help                  Show this help
+  --check-only            Run prerequisite checks then exit (no changes made)
+  --credentials-only      Run the credential wizard and exit (writes .env only)
+  --compose-only          Regenerate docker-compose.yml from existing .env and exit
+  --import-workflows      Import workflows into a running n8n. Auto-installs
+                          community nodes first. API key: --api-key > N8N_API_KEY
+                          in .env > hidden prompt (persists on success).
+  --install-community-nodes  Install required community packages into a running n8n
+                             (standalone; normally called by --import-workflows)
+  --import-dry-run        Validate workflows + credential plan without contacting n8n
+  --init-db               Stage + run database migrations based on .env
+  --verify-db             Verify aerys schema exists and is complete
+  --config-only           Generate soul.md + models.json + config.json from .env
+  --health-check          Run end-to-end health checks (containers/n8n/DB/workflows)
+  --api-key KEY           n8n API key (Settings → API in the n8n UI)
+  --n8n-url URL           n8n base URL (default: http://localhost:5678)
+  --env-path PATH         Target .env location (default: ./.env in CWD)
+  --deploy-dir PATH       Deployment dir for data/config/compose (default: .)
+  --uninstall             Tear down a previous Aerys deployment (prompts before deletion)
+  --yes                   Skip interactive prompts (use with --uninstall for scripts)
+  --quiet                 Suppress banner and progress output; errors still print
+
+Exit codes:
+  0  success
+  1  cancelled or general failure
+  2  prerequisite check failed
+EOF
+}
+
+main() {
+  local check_only=0
+  local credentials_only=0
+  local compose_only=0
+  local import_workflows=0
+  local install_community_nodes_flag=0
+  local import_dry_run=0
+  local init_db=0
+  local verify_db=0
+  local config_only=0
+  local health_check=0
+  local yes_flag=0
+  local uninstall=0
+  local quiet=0
+  local env_path=".env"
+  local deploy_dir="."
+  local n8n_url="http://localhost:5678"
+  local api_key=""
+
+  # --- Subcommand layer ---
+  # If $1 is a recognized verb, translate it to equivalent flag state OR run
+  # a dedicated function and exit. Backward-compat: if $1 starts with `-` or
+  # is empty, skip dispatch and fall through to flag parsing.
+  #
+  # Persisted DEPLOY_DIR / ENV_PATH (if present in ~/.aerys/config) seed the
+  # defaults so day-to-day verbs don't need --deploy-dir every time.
+  #
+  # Install is a special case: it SETS UP the deploy, so stale persisted
+  # paths from a prior run (especially one killed/uninstalled partway
+  # through) shouldn't leak into a fresh install. Install defaults to CWD
+  # unless --deploy-dir / --env-path is passed explicitly.
+
+  local banner_printed=0
+  local subcmd="${1:-}"
+
+  case "$subcmd" in
+    install)
+      : ;;  # skip persisted config — use CWD defaults
+    *)
+      read_aerys_config
+      if [ -n "${DEPLOY_DIR:-}" ]; then deploy_dir="$DEPLOY_DIR"; fi
+      if [ -n "${ENV_PATH:-}" ]; then env_path="$ENV_PATH"; fi
+      ;;
+  esac
+  case "$subcmd" in
+    install|update|upgrade-workflows|health|check|credentials|compose|config\
+    |init-db|verify-db|install-community-nodes|install-discord-watchdog\
+    |start|stop|restart|watch\
+    |rename|set-webhook|register-telegram|uninstall|help)
+      shift  # consume the verb
+      # Peek args for --deploy-dir / --env-path / --api-key overrides
+      local rest_args=("$@")
+      local i=0
+      while [ $i -lt ${#rest_args[@]} ]; do
+        case "${rest_args[i]}" in
+          --deploy-dir) i=$((i+1)); deploy_dir="${rest_args[i]}" ;;
+          --env-path)   i=$((i+1)); env_path="${rest_args[i]}" ;;
+          --api-key)    i=$((i+1)); api_key="${rest_args[i]}" ;;
+          --n8n-url)    i=$((i+1)); n8n_url="${rest_args[i]}" ;;
+          --yes)        yes_flag=1 ;;
+          --quiet)      quiet=1 ;;
+        esac
+        i=$((i+1))
+      done
+      if [ "$quiet" -eq 0 ]; then
+        print_banner
+        banner_printed=1
+      fi
+      case "$subcmd" in
+        help)         aerys_usage; exit 0 ;;
+        install)      ;;  # fall through, nothing set — runs full default install
+        check)        check_only=1 ;;
+        credentials)  credentials_only=1 ;;
+        compose)      compose_only=1 ;;
+        config)       config_only=1 ;;
+        init-db)      init_db=1 ;;
+        verify-db)    verify_db=1 ;;
+        install-community-nodes) install_community_nodes_flag=1 ;;
+        install-discord-watchdog)
+          cmd_install_discord_watchdog "$deploy_dir" "$env_path"; exit $? ;;
+        upgrade-workflows)
+          import_workflows=1
+          # api_key is resolved later (env → prompt) so the flag is optional.
+          ;;
+        health)       health_check=1 ;;
+        update)       # Full update: regen compose + config from (presumably
+                      # just-pulled) installer templates, then pull latest
+                      # n8n + postgres images, then bounce containers.
+                      if ! generate_docker_compose "$env_path" "$deploy_dir"; then
+                        log_error "Compose regen failed."; exit 1
+                      fi
+                      if ! generate_configs "$env_path" "$deploy_dir"; then
+                        log_error "Config regen failed."; exit 1
+                      fi
+                      if [ -f "${deploy_dir}/docker-compose.yml" ]; then
+                        log_info "Pulling latest container images..."
+                        (cd "$deploy_dir" && docker compose pull) || {
+                          log_warn "Image pull failed — check network. Skipping up-d."
+                          exit 1
+                        }
+                        log_info "Recreating containers with the new images..."
+                        (cd "$deploy_dir" && docker compose up -d) || {
+                          log_error "docker compose up -d failed."
+                          exit 1
+                        }
+                        log_success "Update complete. Workflows stay as-is — run"
+                        log_success "./aerys upgrade-workflows --api-key KEY if the"
+                        log_success "workflow JSONs changed in this release."
+                      else
+                        log_info "No docker-compose.yml yet — run ./aerys install first"
+                        log_info "or ./aerys start once it's generated."
+                      fi
+                      exit 0 ;;
+        uninstall)    uninstall=1 ;;
+        start)        cmd_start "$deploy_dir"; exit $? ;;
+        stop)         cmd_stop "$deploy_dir"; exit $? ;;
+        restart)      cmd_restart "$deploy_dir"; exit $? ;;
+        watch)        cmd_watch "$deploy_dir"; exit $? ;;
+        rename)
+          cmd_rename "$deploy_dir" "$env_path" "${1:-}"; exit $? ;;
+        set-webhook)
+          cmd_set_webhook "$deploy_dir" "$env_path" "${1:-}"; exit $? ;;
+        register-telegram)
+          cmd_register_telegram "$env_path"; exit $? ;;
+      esac
+      # Fall through with the flags set; flag-parsing loop below is now a
+      # no-op because we shifted the subcommand off $@, so we proceed
+      # straight to the dispatch blocks further down.
+      ;;
+    *)
+      # Not a subcommand — fall through to legacy flag parsing
+      ;;
+  esac
+
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --help|-h) usage; exit 0 ;;
+      --check-only) check_only=1; shift ;;
+      --credentials-only) credentials_only=1; shift ;;
+      --compose-only) compose_only=1; shift ;;
+      --import-workflows) import_workflows=1; shift ;;
+      --install-community-nodes) install_community_nodes_flag=1; shift ;;
+      --import-dry-run) import_dry_run=1; shift ;;
+      --init-db) init_db=1; shift ;;
+      --verify-db) verify_db=1; shift ;;
+      --config-only) config_only=1; shift ;;
+      --health-check) health_check=1; shift ;;
+      --api-key)
+        shift
+        [ $# -gt 0 ] || { log_error "--api-key requires a value"; exit 1; }
+        api_key="$1"
+        shift
+        ;;
+      --n8n-url)
+        shift
+        [ $# -gt 0 ] || { log_error "--n8n-url requires a value"; exit 1; }
+        n8n_url="$1"
+        shift
+        ;;
+      --env-path)
+        shift
+        [ $# -gt 0 ] || { log_error "--env-path requires a value"; exit 1; }
+        env_path="$1"
+        shift
+        ;;
+      --deploy-dir)
+        shift
+        [ $# -gt 0 ] || { log_error "--deploy-dir requires a value"; exit 1; }
+        deploy_dir="$1"
+        shift
+        ;;
+      --uninstall) uninstall=1; shift ;;
+      --yes) yes_flag=1; shift ;;
+      --quiet) quiet=1; shift ;;
+      *) log_error "Unknown flag: $1"; usage; exit 1 ;;
+    esac
+  done
+
+  if [ "$quiet" -eq 0 ] && [ "$banner_printed" -eq 0 ]; then
+    print_banner
+  fi
+
+  if [ "$uninstall" -eq 1 ]; then
+    run_uninstall "$deploy_dir" "$env_path" "$yes_flag"
+    exit $?
+  fi
+
+  # --import-dry-run: validate plan without contacting n8n
+  if [ "$import_dry_run" -eq 1 ]; then
+    import_workflows_dry_run "$env_path"
+    exit $?
+  fi
+
+  # --install-community-nodes: standalone bootstrap of n8n community packages
+  if [ "$install_community_nodes_flag" -eq 1 ]; then
+    install_community_nodes "$deploy_dir"
+    exit $?
+  fi
+
+  # --import-workflows: skip prereq + wizard, just import.
+  # Community nodes are installed first so workflow activation succeeds
+  # for the ~7 workflows that depend on @tavily, @mazix, and katerlol
+  # Discord packages. install_community_nodes is idempotent (npm install
+  # with existing node_modules is a no-op beyond a version check).
+  if [ "$import_workflows" -eq 1 ]; then
+    # Resolve API key: --api-key flag > N8N_API_KEY in .env > hidden prompt.
+    # Valid keys persist to .env so future runs don't re-prompt.
+    if ! resolve_n8n_api_key "$env_path" "$n8n_url" "$api_key"; then
+      exit 1
+    fi
+    api_key="$RESOLVED_N8N_API_KEY"
+    if ! install_community_nodes "$deploy_dir"; then
+      log_error "Community-node bootstrap failed. Workflow activation would fail for"
+      log_error "Discord/Tavily/DOCX-dependent workflows. Fix the issue above and re-run."
+      log_error "Or install them manually via the n8n UI (Settings → Community Nodes)"
+      log_error "and re-run: ./aerys upgrade-workflows"
+      exit 1
+    fi
+    # set -e would abort the script when import_workflows returns non-zero
+    # (e.g. rc=4 for partial activation failures) BEFORE we capture $?.
+    # Use if/else so bash doesn't treat the non-zero as an uncaught error.
+    local import_rc=0
+    if ! import_workflows "$api_key" "$env_path" "$deploy_dir" "$n8n_url"; then
+      import_rc=$?
+    fi
+    # Print the "Aerys is live" signifier on a clean or partial run.
+    # exit 0 = everything activated; exit 4 = some workflows failed to activate
+    # (we still print — import succeeded, activation gaps are follow-up work).
+    if [ "$import_rc" -eq 0 ] || [ "$import_rc" -eq 4 ]; then
+      if [ -f "${INSTALLER_DIR}/assets/aerys-live-banner.txt" ]; then
+        echo
+        cat "${INSTALLER_DIR}/assets/aerys-live-banner.txt"
+        echo
+      fi
+    fi
+    exit "$import_rc"
+  fi
+
+  # --compose-only path: skip prereq + wizard, just regenerate compose
+  if [ "$compose_only" -eq 1 ]; then
+    if ! generate_docker_compose "$env_path" "$deploy_dir"; then
+      log_error "Compose generation failed."
+      exit 1
+    fi
+    exit 0
+  fi
+
+  # --init-db: stage migrations (+ run on external) from existing .env
+  if [ "$init_db" -eq 1 ]; then
+    init_database "$env_path" "$deploy_dir"
+    exit $?
+  fi
+
+  # --verify-db: check schema is present + correct
+  if [ "$verify_db" -eq 1 ]; then
+    verify_database "$env_path" "$deploy_dir"
+    exit $?
+  fi
+
+  # --config-only: generate soul.md + models.json + config.json
+  if [ "$config_only" -eq 1 ]; then
+    generate_configs "$env_path" "$deploy_dir"
+    exit $?
+  fi
+
+  # --health-check: verify running install is healthy
+  # API key is optional here (the workflow-count check needs it, other
+  # checks don't). If no --api-key flag, fall back to N8N_API_KEY in .env
+  # silently — no prompt, no validation. run_health_check will report the
+  # workflow check as skipped if the key is absent or rejected.
+  if [ "$health_check" -eq 1 ]; then
+    if [ -z "$api_key" ]; then
+      api_key=$(_read_env_n8n_api_key "$env_path")
+    fi
+    run_health_check "$env_path" "$deploy_dir" "$n8n_url" "$api_key"
+    exit $?
+  fi
+
+  # Prerequisite phase runs for every non-uninstall path.
+  # --credentials-only skips prereq check because a user might run the wizard
+  # to produce a .env before installing Docker (valid workflow).
+  if [ "$credentials_only" -eq 0 ]; then
+    if ! check_prereqs; then
+      log_error "Prerequisite check failed. Fix the issues above and re-run."
+      exit 2
+    fi
+  fi
+
+  if [ "$check_only" -eq 1 ]; then
+    log_success "All prerequisites look good. Re-run without --check-only to install."
+    exit 0
+  fi
+
+  # Credential wizard writes .env
+  if ! run_credential_wizard "$env_path"; then
+    log_error "Credential wizard did not complete."
+    exit 1
+  fi
+
+  if [ "$credentials_only" -eq 1 ]; then
+    log_success ".env ready at ${env_path}. Re-run without --credentials-only to continue the install."
+    exit 0
+  fi
+
+  # docker-compose.yml generation
+  if ! generate_docker_compose "$env_path" "$deploy_dir"; then
+    log_error "Compose generation failed."
+    exit 1
+  fi
+
+  # Database initialization (stage migrations; external path runs them immediately)
+  if ! init_database "$env_path" "$deploy_dir"; then
+    log_error "Database initialization failed."
+    exit 1
+  fi
+
+  # Config files: soul.md (personality) + models.json + config.json
+  if ! generate_configs "$env_path" "$deploy_dir"; then
+    log_error "Config setup failed."
+    exit 1
+  fi
+
+  # Persist paths so day-to-day `aerys start/stop/restart/watch` calls don't
+  # need the user to pass --deploy-dir every time.
+  persist_install_paths "$deploy_dir" "$env_path"
+
+  # Offer tab completion. Interactive prompt (y/n, default y); idempotent
+  # if already installed; skip silently if shell isn't bash/zsh.
+  offer_shell_integration
+
+  # Offer Discord IPC watchdog if Discord is configured. Without this, only
+  # one of the two Discord adapters listens after any n8n container restart.
+  offer_discord_watchdog "$deploy_dir" "$env_path"
+
+  # n8n requires interactive owner setup before API access works, so the
+  # workflow import phase isn't auto-chained here. Print clear next-steps:
+  log_section "Next steps — start stack + n8n owner setup + workflow import"
+  cat <<EOF
+  1. Start the stack:
+       ./aerys start
+
+  2. Wait ~30 seconds for n8n to come up, then visit:
+       ${n8n_url}
+
+  3. Complete the n8n owner setup (one-time email + password).
+
+  4. Generate an API key:
+       Settings → API → Create API Key
+
+  5. Import workflows (prompts for the API key on first run, saves it to
+     .env chmod 600 so you never paste it again):
+       ./aerys upgrade-workflows
+
+  6. Verify the database schema:
+       ./aerys verify-db
+
+  7. (Discord users) Once the bot is invited to your server, run the
+     03-02-register-commands workflow manually in the n8n UI to
+     register slash commands. It is not auto-activated.
+
+  8. Run a health check once the stack is up + workflows imported:
+       ./aerys health
+
+  9. Read installer/POST-INSTALL.md for Cloudflare tunnel, Telegram
+     webhook registration, updates, backups, and troubleshooting.
+EOF
+  exit 0
+}
+
+main "$@"

@@ -1,6 +1,6 @@
 {
-  "updatedAt": "2026-01-01T00:00:00.000Z",
-  "createdAt": "2026-01-01T00:00:00.000Z",
+  "updatedAt": "2026-03-18T00:53:52.272Z",
+  "createdAt": "2026-02-21T16:03:05.324Z",
   "id": "03-01-identity-resolver",
   "name": "03-01 Identity Resolver",
   "description": null,
@@ -296,14 +296,15 @@
   "settings": {
     "executionOrder": "v1",
     "callerPolicy": "workflowsFromSameOwner",
-    "availableInMCP": false
+    "availableInMCP": false,
+    "errorWorkflow": "YOUR_CENTRAL_ERROR_WORKFLOW_ID"
   },
   "staticData": null,
   "meta": null,
   "pinData": null,
   "versionId": "00000000-0000-0000-0000-000000000000",
   "activeVersionId": "00000000-0000-0000-0000-000000000000",
-  "versionCounter": 6,
+  "versionCounter": 30,
   "triggerCount": 0,
   "shared": [
     {
@@ -617,27 +618,11 @@
         ]
       }
     },
-    "authors": "Your Name",
+    "authors": [],
     "name": null,
     "description": null,
     "autosaved": false,
-    "workflowPublishHistory": [
-      {
-        "createdAt": "2026-02-21T17:06:52.051Z",
-        "id": 93,
-        "workflowId": "YOUR_IDENTITY_RESOLVER_WORKFLOW_ID",
-        "versionId": "00000000-0000-0000-0000-000000000000",
-        "event": "deactivated",
-        "userId": "00000000-0000-0000-0000-000000000000"
-      },
-      {
-        "createdAt": "2026-02-21T17:06:52.092Z",
-        "id": 94,
-        "workflowId": "YOUR_IDENTITY_RESOLVER_WORKFLOW_ID",
-        "versionId": "00000000-0000-0000-0000-000000000000",
-        "event": "activated",
-        "userId": "00000000-0000-0000-0000-000000000000"
-      }
-    ]
+    "workflowPublishHistory": [],
+    "id": "00000000-0000-0000-0000-000000000000"
   }
 }

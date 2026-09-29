@@ -1,0 +1,671 @@
+{
+  "updatedAt": "2026-01-01T00:00:00.000Z",
+  "createdAt": "2026-01-01T00:00:00.000Z",
+  "id": "04-02-memory-retrieval",
+  "name": "04-02 Memory Retrieval",
+  "description": null,
+  "active": true,
+  "isArchived": false,
+  "nodes": [
+    {
+      "id": "mem-ret-trigger-01",
+      "name": "Execute Workflow Trigger",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        200,
+        300
+      ],
+      "parameters": {
+        "inputSource": "passthrough"
+      }
+    },
+    {
+      "id": "mem-ret-embed-01",
+      "name": "Embed Query Text",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        480,
+        300
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "YOUR_OPENROUTER_HEADER_AUTH_ID",
+          "name": "OpenRouter Header Auth"
+        }
+      },
+      "parameters": {
+        "method": "POST",
+        "url": "https://openrouter.ai/api/v1/embeddings",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ model: 'openai/text-embedding-3-small', input: $json.message_text || '' }) }}",
+        "options": {}
+      }
+    },
+    {
+      "id": "mem-ret-build-01",
+      "name": "Build Retrieval Query",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        760,
+        300
+      ],
+      "parameters": {
+        "jsCode": "// $json here = output of Embed Query Text (embedding result)\n// To get original trigger input (person_id, privacy_context), use the trigger node reference\nconst triggerInput = $('Execute Workflow Trigger').first().json;\nconst embeddingResult = $input.first().json;  // output of Embed Query Text\nconst embedding = embeddingResult.data?.[0]?.embedding || [];\n\nconst privacyContext = triggerInput.privacy_context || 'public';\n\nreturn [{\n  json: {\n    person_id: triggerInput.person_id,\n    embedding_str: '[' + embedding.join(',') + ']',\n    privacy_context: privacyContext,\n    is_private: privacyContext === 'private'\n  }\n}];"
+      }
+    },
+    {
+      "id": "mem-ret-privacy-branch",
+      "name": "Privacy Branch",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1040,
+        300
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "privacy-check",
+              "leftValue": "={{ $json.is_private }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "mem-ret-query-private-01",
+      "name": "Retrieve Memories (Private)",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        1320,
+        200
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "YOUR_POSTGRES_CREDENTIAL_ID",
+          "name": "Aerys DB (aerys)"
+        }
+      },
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT\n  m.id,\n  m.person_id,\n  m.content,\n  m.source_platform,\n  m.privacy_level,\n  m.created_at,\n  (1 - (m.embedding <=> $1::vector)) * 0.7\n  + LEAST(1.0, GREATEST(0.0,\n      1 - EXTRACT(EPOCH FROM (NOW() - m.created_at)) / 2592000.0\n    )) * 0.3 AS combined_score\nFROM memories m\nWHERE m.person_id = $2::uuid\n  AND m.deleted_at IS NULL\n  AND m.privacy_level IN ('public', 'private')\nUNION ALL\nSELECT NULL::uuid, NULL::uuid, NULL, NULL, NULL, NULL, 0.0\nWHERE NOT EXISTS (\n  SELECT 1 FROM memories\n  WHERE person_id = $2::uuid\n    AND deleted_at IS NULL\n    AND privacy_level IN ('public', 'private')\n)\nORDER BY combined_score DESC\nLIMIT 20;",
+        "options": {
+          "queryReplacement": "={{ [$json.embedding_str, $json.person_id] }}"
+        }
+      }
+    },
+    {
+      "id": "mem-ret-query-public-01",
+      "name": "Retrieve Memories (Public)",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        1320,
+        400
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "YOUR_POSTGRES_CREDENTIAL_ID",
+          "name": "Aerys DB (aerys)"
+        }
+      },
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT\n  m.id,\n  m.person_id,\n  m.content,\n  m.source_platform,\n  m.privacy_level,\n  m.created_at,\n  (1 - (m.embedding <=> $1::vector)) * 0.7\n  + LEAST(1.0, GREATEST(0.0,\n      1 - EXTRACT(EPOCH FROM (NOW() - m.created_at)) / 2592000.0\n    )) * 0.3 AS combined_score\nFROM memories m\nWHERE m.person_id = $2::uuid\n  AND m.deleted_at IS NULL\n  AND m.privacy_level = 'public'\nUNION ALL\nSELECT NULL::uuid, NULL::uuid, NULL, NULL, NULL, NULL, 0.0\nWHERE NOT EXISTS (\n  SELECT 1 FROM memories\n  WHERE person_id = $2::uuid\n    AND deleted_at IS NULL\n    AND privacy_level = 'public'\n)\nORDER BY combined_score DESC\nLIMIT 20;",
+        "options": {
+          "queryReplacement": "={{ [$json.embedding_str, $json.person_id] }}"
+        }
+      }
+    },
+    {
+      "id": "mem-ret-wrap-private",
+      "name": "Wrap Private Results",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1560,
+        200
+      ],
+      "parameters": {
+        "jsCode": "const rows = $input.all()\n  .map(i => i.json)\n  .filter(r => r && r.content != null);  // Filter out UNION placeholder (null content)\nreturn [{ json: { rows: rows } }];"
+      }
+    },
+    {
+      "id": "mem-ret-wrap-public",
+      "name": "Wrap Public Results",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1560,
+        400
+      ],
+      "parameters": {
+        "jsCode": "const rows = $input.all()\n  .map(i => i.json)\n  .filter(r => r && r.content != null);  // Filter out UNION placeholder (null content)\nreturn [{ json: { rows: rows } }];"
+      }
+    },
+    {
+      "id": "mem-ret-format-01",
+      "name": "Format Memory Context",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1800,
+        300
+      ],
+      "parameters": {
+        "jsCode": "const input = $input.first().json;\nconst rows = input.rows || [];\n\nif (rows.length === 0) {\n  return [{ json: { memory_context: '' } }];\n}\n\n// Deduplicate by key_label prefix (text before first ':')\n// Rows are already sorted by combined_score DESC, so first occurrence wins\nconst seen = new Set();\nconst deduped = rows.filter(r => {\n  const key = r.content && r.content.includes(':')\n    ? r.content.split(':')[0].trim().toLowerCase()\n    : r.content ? r.content.trim().toLowerCase() : '';\n  if (seen.has(key)) return false;\n  seen.add(key);\n  return true;\n});\n\n// Cap at 5 unique memories after dedup\nconst top = deduped.slice(0, 5);\n\n// Format as bullet list for LLM attention\n// Strip key_label prefix from display for natural reading\nconst lines = top.map((r) => {\n  let display = r.content || '';\n  if (display.includes(':')) {\n    display = display.split(':').slice(1).join(':').trim();\n  }\n  const age = r.created_at\n    ? `(${Math.round((Date.now() - new Date(r.created_at)) / 86400000)}d ago)`\n    : '';\n  const src = r.source_platform ? `[${r.source_platform}]` : '';\n  return `* ${display} ${src} ${age}`.trim();\n});\n\nreturn [{ json: { memory_context: lines.join('\\n') } }];",
+        "mode": "runOnceForAllItems"
+      }
+    },
+    {
+      "id": "mem-ret-return-01",
+      "name": "Return Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2080,
+        300
+      ],
+      "parameters": {
+        "jsCode": "const mc = $input.first().json.memory_context || '';\nreturn [{ json: { memory_context: mc } }];"
+      }
+    }
+  ],
+  "connections": {
+    "Execute Workflow Trigger": {
+      "main": [
+        [
+          {
+            "node": "Embed Query Text",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Embed Query Text": {
+      "main": [
+        [
+          {
+            "node": "Build Retrieval Query",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Retrieval Query": {
+      "main": [
+        [
+          {
+            "node": "Privacy Branch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Privacy Branch": {
+      "main": [
+        [
+          {
+            "node": "Retrieve Memories (Private)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Retrieve Memories (Public)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Retrieve Memories (Private)": {
+      "main": [
+        [
+          {
+            "node": "Wrap Private Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Retrieve Memories (Public)": {
+      "main": [
+        [
+          {
+            "node": "Wrap Public Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wrap Private Results": {
+      "main": [
+        [
+          {
+            "node": "Format Memory Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wrap Public Results": {
+      "main": [
+        [
+          {
+            "node": "Format Memory Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Memory Context": {
+      "main": [
+        [
+          {
+            "node": "Return Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  },
+  "staticData": null,
+  "meta": null,
+  "pinData": null,
+  "versionId": "00000000-0000-0000-0000-000000000000",
+  "activeVersionId": "00000000-0000-0000-0000-000000000000",
+  "versionCounter": 54,
+  "triggerCount": 0,
+  "shared": [
+    {
+      "updatedAt": "2026-02-24T01:14:40.469Z",
+      "createdAt": "2026-02-24T01:14:40.469Z",
+      "role": "workflow:owner",
+      "workflowId": "YOUR_MEMORY_RETRIEVAL_WORKFLOW_ID",
+      "projectId": "YOUR_N8N_PROJECT_ID",
+      "project": {
+        "updatedAt": "2026-01-01T00:00:00.000Z",
+        "createdAt": "2026-01-01T00:00:00.000Z",
+        "id": "YOUR_N8N_PROJECT_ID",
+        "name": "Your Project",
+        "type": "personal",
+        "icon": null,
+        "description": null,
+        "creatorId": "00000000-0000-0000-0000-000000000000"
+      }
+    }
+  ],
+  "tags": [],
+  "activeVersion": {
+    "updatedAt": "2026-03-08T04:05:48.557Z",
+    "createdAt": "2026-03-08T04:05:48.557Z",
+    "versionId": "00000000-0000-0000-0000-000000000000",
+    "workflowId": "YOUR_MEMORY_RETRIEVAL_WORKFLOW_ID",
+    "nodes": [
+      {
+        "id": "mem-ret-trigger-01",
+        "name": "Execute Workflow Trigger",
+        "type": "n8n-nodes-base.executeWorkflowTrigger",
+        "typeVersion": 1.1,
+        "position": [
+          200,
+          300
+        ],
+        "parameters": {
+          "inputSource": "passthrough"
+        }
+      },
+      {
+        "id": "mem-ret-embed-01",
+        "name": "Embed Query Text",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          480,
+          300
+        ],
+        "credentials": {
+          "httpHeaderAuth": {
+            "id": "YOUR_OPENROUTER_HEADER_AUTH_ID",
+            "name": "OpenRouter Header Auth"
+          }
+        },
+        "parameters": {
+          "method": "POST",
+          "url": "https://openrouter.ai/api/v1/embeddings",
+          "authentication": "genericCredentialType",
+          "genericAuthType": "httpHeaderAuth",
+          "sendBody": true,
+          "contentType": "raw",
+          "rawContentType": "application/json",
+          "body": "={{ JSON.stringify({ model: 'openai/text-embedding-3-small', input: $json.message_text || '' }) }}",
+          "options": {}
+        }
+      },
+      {
+        "id": "mem-ret-build-01",
+        "name": "Build Retrieval Query",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          760,
+          300
+        ],
+        "parameters": {
+          "jsCode": "// $json here = output of Embed Query Text (embedding result)\n// To get original trigger input (person_id, privacy_context), use the trigger node reference\nconst triggerInput = $('Execute Workflow Trigger').first().json;\nconst embeddingResult = $input.first().json;  // output of Embed Query Text\nconst embedding = embeddingResult.data?.[0]?.embedding || [];\n\nconst privacyContext = triggerInput.privacy_context || 'public';\n\nreturn [{\n  json: {\n    person_id: triggerInput.person_id,\n    embedding_str: '[' + embedding.join(',') + ']',\n    privacy_context: privacyContext,\n    is_private: privacyContext === 'private'\n  }\n}];"
+        }
+      },
+      {
+        "id": "mem-ret-privacy-branch",
+        "name": "Privacy Branch",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2,
+        "position": [
+          1040,
+          300
+        ],
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "strict"
+            },
+            "conditions": [
+              {
+                "id": "privacy-check",
+                "leftValue": "={{ $json.is_private }}",
+                "rightValue": true,
+                "operator": {
+                  "type": "boolean",
+                  "operation": "equals"
+                }
+              }
+            ],
+            "combinator": "and"
+          }
+        }
+      },
+      {
+        "id": "mem-ret-query-private-01",
+        "name": "Retrieve Memories (Private)",
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.5,
+        "position": [
+          1320,
+          200
+        ],
+        "credentials": {
+          "postgres": {
+            "id": "YOUR_POSTGRES_CREDENTIAL_ID",
+            "name": "Aerys DB (aerys)"
+          }
+        },
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "SELECT\n  m.id,\n  m.person_id,\n  m.content,\n  m.source_platform,\n  m.privacy_level,\n  m.created_at,\n  (1 - (m.embedding <=> $1::vector)) * 0.7\n  + LEAST(1.0, GREATEST(0.0,\n      1 - EXTRACT(EPOCH FROM (NOW() - m.created_at)) / 2592000.0\n    )) * 0.3 AS combined_score\nFROM memories m\nWHERE m.person_id = $2::uuid\n  AND m.deleted_at IS NULL\n  AND m.privacy_level IN ('public', 'private')\nUNION ALL\nSELECT NULL::uuid, NULL::uuid, NULL, NULL, NULL, NULL, 0.0\nWHERE NOT EXISTS (\n  SELECT 1 FROM memories\n  WHERE person_id = $2::uuid\n    AND deleted_at IS NULL\n    AND privacy_level IN ('public', 'private')\n)\nORDER BY combined_score DESC\nLIMIT 20;",
+          "options": {
+            "queryReplacement": "={{ [$json.embedding_str, $json.person_id] }}"
+          }
+        }
+      },
+      {
+        "id": "mem-ret-query-public-01",
+        "name": "Retrieve Memories (Public)",
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.5,
+        "position": [
+          1320,
+          400
+        ],
+        "credentials": {
+          "postgres": {
+            "id": "YOUR_POSTGRES_CREDENTIAL_ID",
+            "name": "Aerys DB (aerys)"
+          }
+        },
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "SELECT\n  m.id,\n  m.person_id,\n  m.content,\n  m.source_platform,\n  m.privacy_level,\n  m.created_at,\n  (1 - (m.embedding <=> $1::vector)) * 0.7\n  + LEAST(1.0, GREATEST(0.0,\n      1 - EXTRACT(EPOCH FROM (NOW() - m.created_at)) / 2592000.0\n    )) * 0.3 AS combined_score\nFROM memories m\nWHERE m.person_id = $2::uuid\n  AND m.deleted_at IS NULL\n  AND m.privacy_level = 'public'\nUNION ALL\nSELECT NULL::uuid, NULL::uuid, NULL, NULL, NULL, NULL, 0.0\nWHERE NOT EXISTS (\n  SELECT 1 FROM memories\n  WHERE person_id = $2::uuid\n    AND deleted_at IS NULL\n    AND privacy_level = 'public'\n)\nORDER BY combined_score DESC\nLIMIT 20;",
+          "options": {
+            "queryReplacement": "={{ [$json.embedding_str, $json.person_id] }}"
+          }
+        }
+      },
+      {
+        "id": "mem-ret-wrap-private",
+        "name": "Wrap Private Results",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1560,
+          200
+        ],
+        "parameters": {
+          "jsCode": "const rows = $input.all()\n  .map(i => i.json)\n  .filter(r => r && r.content != null);  // Filter out UNION placeholder (null content)\nreturn [{ json: { rows: rows } }];"
+        }
+      },
+      {
+        "id": "mem-ret-wrap-public",
+        "name": "Wrap Public Results",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1560,
+          400
+        ],
+        "parameters": {
+          "jsCode": "const rows = $input.all()\n  .map(i => i.json)\n  .filter(r => r && r.content != null);  // Filter out UNION placeholder (null content)\nreturn [{ json: { rows: rows } }];"
+        }
+      },
+      {
+        "id": "mem-ret-format-01",
+        "name": "Format Memory Context",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1800,
+          300
+        ],
+        "parameters": {
+          "jsCode": "const input = $input.first().json;\nconst rows = input.rows || [];\n\nif (rows.length === 0) {\n  return [{ json: { memory_context: '' } }];\n}\n\n// Deduplicate by key_label prefix (text before first ':')\n// Rows are already sorted by combined_score DESC, so first occurrence wins\nconst seen = new Set();\nconst deduped = rows.filter(r => {\n  const key = r.content && r.content.includes(':')\n    ? r.content.split(':')[0].trim().toLowerCase()\n    : r.content ? r.content.trim().toLowerCase() : '';\n  if (seen.has(key)) return false;\n  seen.add(key);\n  return true;\n});\n\n// Cap at 5 unique memories after dedup\nconst top = deduped.slice(0, 5);\n\n// Format as bullet list for LLM attention\n// Strip key_label prefix from display for natural reading\nconst lines = top.map((r) => {\n  let display = r.content || '';\n  if (display.includes(':')) {\n    display = display.split(':').slice(1).join(':').trim();\n  }\n  const age = r.created_at\n    ? `(${Math.round((Date.now() - new Date(r.created_at)) / 86400000)}d ago)`\n    : '';\n  const src = r.source_platform ? `[${r.source_platform}]` : '';\n  return `* ${display} ${src} ${age}`.trim();\n});\n\nreturn [{ json: { memory_context: lines.join('\\n') } }];",
+          "mode": "runOnceForAllItems"
+        }
+      },
+      {
+        "id": "mem-ret-return-01",
+        "name": "Return Result",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          2080,
+          300
+        ],
+        "parameters": {
+          "jsCode": "const mc = $input.first().json.memory_context || '';\nreturn [{ json: { memory_context: mc } }];"
+        }
+      }
+    ],
+    "connections": {
+      "Execute Workflow Trigger": {
+        "main": [
+          [
+            {
+              "node": "Embed Query Text",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Embed Query Text": {
+        "main": [
+          [
+            {
+              "node": "Build Retrieval Query",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Build Retrieval Query": {
+        "main": [
+          [
+            {
+              "node": "Privacy Branch",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Privacy Branch": {
+        "main": [
+          [
+            {
+              "node": "Retrieve Memories (Private)",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Retrieve Memories (Public)",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Retrieve Memories (Private)": {
+        "main": [
+          [
+            {
+              "node": "Wrap Private Results",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Retrieve Memories (Public)": {
+        "main": [
+          [
+            {
+              "node": "Wrap Public Results",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Wrap Private Results": {
+        "main": [
+          [
+            {
+              "node": "Format Memory Context",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Wrap Public Results": {
+        "main": [
+          [
+            {
+              "node": "Format Memory Context",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Format Memory Context": {
+        "main": [
+          [
+            {
+              "node": "Return Result",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "authors": "Your Name",
+    "name": null,
+    "description": null,
+    "autosaved": false,
+    "workflowPublishHistory": [
+      {
+        "createdAt": "2026-03-08T04:05:48.668Z",
+        "id": 1146,
+        "workflowId": "YOUR_MEMORY_RETRIEVAL_WORKFLOW_ID",
+        "versionId": "00000000-0000-0000-0000-000000000000",
+        "event": "deactivated",
+        "userId": "00000000-0000-0000-0000-000000000000"
+      },
+      {
+        "createdAt": "2026-03-08T04:05:48.733Z",
+        "id": 1147,
+        "workflowId": "YOUR_MEMORY_RETRIEVAL_WORKFLOW_ID",
+        "versionId": "00000000-0000-0000-0000-000000000000",
+        "event": "activated",
+        "userId": "00000000-0000-0000-0000-000000000000"
+      },
+      {
+        "createdAt": "2026-03-08T04:05:48.937Z",
+        "id": 1148,
+        "workflowId": "YOUR_MEMORY_RETRIEVAL_WORKFLOW_ID",
+        "versionId": "00000000-0000-0000-0000-000000000000",
+        "event": "deactivated",
+        "userId": "00000000-0000-0000-0000-000000000000"
+      },
+      {
+        "createdAt": "2026-03-08T04:05:49.077Z",
+        "id": 1149,
+        "workflowId": "YOUR_MEMORY_RETRIEVAL_WORKFLOW_ID",
+        "versionId": "00000000-0000-0000-0000-000000000000",
+        "event": "activated",
+        "userId": "00000000-0000-0000-0000-000000000000"
+      }
+    ]
+  }
+}

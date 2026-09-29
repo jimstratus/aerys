@@ -1,0 +1,270 @@
+{
+  "id": "05-02-research-sub-agent",
+  "name": "05-02 Research Sub-Agent",
+  "description": null,
+  "active": true,
+  "isArchived": false,
+  "nodes": [
+    {
+      "id": "ewt-05-02",
+      "name": "Execute Workflow Trigger",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        60,
+        300
+      ],
+      "parameters": {
+        "inputSource": "passthrough"
+      }
+    },
+    {
+      "id": "read-input-05-02",
+      "name": "Read Input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        280,
+        300
+      ],
+      "parameters": {
+        "jsCode": "const input = $('Execute Workflow Trigger').first().json;\nreturn [{\n  json: {\n    query: input.query || '',\n    person_id: input.person_id,\n    original_message: input.original_message || input.query || '',\n    source_channel: input.source_channel || 'discord',\n    conversation_privacy: input.conversation_privacy || 'public'\n  }\n}];"
+      }
+    },
+    {
+      "id": "tavily-search-05-02",
+      "name": "Tavily Search",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        500,
+        300
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.tavily.com/search",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{JSON.stringify({query: $json.query, search_depth: 'advanced', include_answer: 'advanced', max_results: 5, include_raw_content: false, topic: 'general'})}}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "YOUR_TAVILY_HEADER_AUTH_ID",
+          "name": "Tavily API"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "jsCode": "// Format Return — direct Tavily results, no LLM synthesis pass\nconst tavily = $input.first().json;\nconst input = $('Read Input').item.json;\n\nif (tavily.error || !tavily.answer) {\n  return [{json: {\n    result: `Search for \"${input.query}\" didn't return useful results. Try a different query or I can answer from what I know.`,\n    query: input.query\n  }}];\n}\n\nconst sources = (tavily.results || [])\n  .slice(0, 5)\n  .map(r => `- [${r.title}](${r.url})`)\n  .join('\\n');\n\nreturn [{json: {\n  result: `${tavily.answer}\\n\\nSources:\\n${sources}`,\n  query: input.query\n}}];"
+      },
+      "name": "Format Return",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        720,
+        300
+      ],
+      "id": "format-return-node-001"
+    }
+  ],
+  "connections": {
+    "Execute Workflow Trigger": {
+      "main": [
+        [
+          {
+            "node": "Read Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Input": {
+      "main": [
+        [
+          {
+            "node": "Tavily Search",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Tavily Search": {
+      "main": [
+        [
+          {
+            "node": "Format Return",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false,
+    "errorWorkflow": "YOUR_ERROR_HANDLER_WORKFLOW_ID"
+  },
+  "staticData": null,
+  "activeVersionId": "00000000-0000-0000-0000-000000000000",
+  "versionCounter": 18,
+  "triggerCount": 0,
+  "tags": [],
+  "activeVersion": {
+    "updatedAt": "2026-03-20T00:30:20.772Z",
+    "createdAt": "2026-03-20T00:30:20.772Z",
+    "versionId": "00000000-0000-0000-0000-000000000000",
+    "workflowId": "YOUR_RESEARCH_AGENT_WORKFLOW_ID",
+    "nodes": [
+      {
+        "id": "ewt-05-02",
+        "name": "Execute Workflow Trigger",
+        "type": "n8n-nodes-base.executeWorkflowTrigger",
+        "typeVersion": 1.1,
+        "position": [
+          60,
+          300
+        ],
+        "parameters": {
+          "inputSource": "passthrough"
+        }
+      },
+      {
+        "id": "read-input-05-02",
+        "name": "Read Input",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          280,
+          300
+        ],
+        "parameters": {
+          "jsCode": "const input = $('Execute Workflow Trigger').first().json;\nreturn [{\n  json: {\n    query: input.query || '',\n    person_id: input.person_id,\n    original_message: input.original_message || input.query || '',\n    source_channel: input.source_channel || 'discord',\n    conversation_privacy: input.conversation_privacy || 'public'\n  }\n}];"
+        }
+      },
+      {
+        "id": "tavily-search-05-02",
+        "name": "Tavily Search",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          500,
+          300
+        ],
+        "parameters": {
+          "method": "POST",
+          "url": "https://api.tavily.com/search",
+          "authentication": "genericCredentialType",
+          "genericAuthType": "httpHeaderAuth",
+          "sendBody": true,
+          "contentType": "raw",
+          "rawContentType": "application/json",
+          "body": "={{JSON.stringify({query: $json.query, search_depth: 'advanced', include_answer: 'advanced', max_results: 5, include_raw_content: false, topic: 'general'})}}",
+          "options": {
+            "response": {
+              "response": {
+                "neverError": true
+              }
+            }
+          }
+        },
+        "credentials": {
+          "httpHeaderAuth": {
+            "id": "YOUR_TAVILY_HEADER_AUTH_ID",
+            "name": "Tavily API"
+          }
+        },
+        "retryOnFail": true,
+        "maxTries": 3,
+        "waitBetweenTries": 2000
+      },
+      {
+        "parameters": {
+          "jsCode": "// Format Return — direct Tavily results, no LLM synthesis pass\nconst tavily = $input.first().json;\nconst input = $('Read Input').item.json;\n\nif (tavily.error || !tavily.answer) {\n  return [{json: {\n    result: `Search for \"${input.query}\" didn't return useful results. Try a different query or I can answer from what I know.`,\n    query: input.query\n  }}];\n}\n\nconst sources = (tavily.results || [])\n  .slice(0, 5)\n  .map(r => `- [${r.title}](${r.url})`)\n  .join('\\n');\n\nreturn [{json: {\n  result: `${tavily.answer}\\n\\nSources:\\n${sources}`,\n  query: input.query\n}}];"
+        },
+        "name": "Format Return",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          720,
+          300
+        ],
+        "id": "format-return-node-001"
+      }
+    ],
+    "connections": {
+      "Execute Workflow Trigger": {
+        "main": [
+          [
+            {
+              "node": "Read Input",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Read Input": {
+        "main": [
+          [
+            {
+              "node": "Tavily Search",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Tavily Search": {
+        "main": [
+          [
+            {
+              "node": "Format Return",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "authors": "Your Name",
+    "name": null,
+    "description": null,
+    "autosaved": false,
+    "workflowPublishHistory": [
+      {
+        "createdAt": "2026-03-20T00:30:20.967Z",
+        "id": 1305,
+        "workflowId": "YOUR_RESEARCH_AGENT_WORKFLOW_ID",
+        "versionId": "00000000-0000-0000-0000-000000000000",
+        "event": "deactivated",
+        "userId": "00000000-0000-0000-0000-000000000000"
+      },
+      {
+        "createdAt": "2026-03-20T00:30:21.025Z",
+        "id": 1306,
+        "workflowId": "YOUR_RESEARCH_AGENT_WORKFLOW_ID",
+        "versionId": "00000000-0000-0000-0000-000000000000",
+        "event": "activated",
+        "userId": "00000000-0000-0000-0000-000000000000"
+      }
+    ]
+  }
+}

@@ -1,6 +1,6 @@
 {
-  "updatedAt": "2026-01-01T00:00:00.000Z",
-  "createdAt": "2026-01-01T00:00:00.000Z",
+  "updatedAt": "2026-03-18T03:13:40.985Z",
+  "createdAt": "2026-02-25T00:25:34.984Z",
   "id": "04-03-guardian",
   "name": "04-03 Guardian",
   "description": null,
@@ -148,7 +148,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Process ALL clusters — output one item per cluster\n// Embed fallback data in every item so Parse LLM Output never needs back-references\nconst allClusters = $input.all().map(i => i.json);\n\nreturn allClusters.map(cluster => {\n  const c = cluster.candidates[0];\n  const fallbackText  = c.key_label + ': ' + (c.all_values || '').split(' ||| ')[0];\n  const fallbackConf  = parseFloat(c.computed_confidence) || 0.75;\n\n  if (!cluster.needs_llm_consolidation) {\n    return { json: {\n      speaker_id:  cluster.speaker_id,\n      key_label:   c.key_label,\n      claim_text:  fallbackText,\n      confidence:  fallbackConf,\n      _needs_llm:  false\n    }};\n  }\n\n  const body = {\n    model: 'anthropic/claude-haiku-4-5',\n    temperature: 0.0,\n    max_tokens: 400,\n    messages: [\n      {\n        role: 'system',\n        content: 'You are consolidating possibly-duplicate profile facts about the same person.\\nGiven a list of observed facts, merge duplicates and resolve contradictions.\\nReturn a JSON array of final claims: [{\"key_label\": \"...\", \"claim_text\": \"key: value\", \"confidence\": 0.0-1.0}]\\nIf facts contradict each other, keep the most recent with lower confidence.\\nNever return more claims than you received candidates.'\n      },\n      {\n        role: 'user',\n        content: 'Candidates to consolidate:\\n' + JSON.stringify(\n          cluster.candidates.map(c => ({ key: c.key_label, value: c.all_values })), null, 2\n        )\n      }\n    ]\n  };\n\n  return { json: {\n    body,\n    speaker_id:  cluster.speaker_id,\n    key_label:   c.key_label,\n    claim_text:  fallbackText,\n    confidence:  fallbackConf,\n    _needs_llm:  true\n  }};\n});",
+        "jsCode": "// Process ALL clusters \u2014 output one item per cluster\n// Embed fallback data in every item so Parse LLM Output never needs back-references\nconst allClusters = $input.all().map(i => i.json);\n\nreturn allClusters.map(cluster => {\n  const c = cluster.candidates[0];\n  const fallbackText  = c.key_label + ': ' + (c.all_values || '').split(' ||| ')[0];\n  const fallbackConf  = parseFloat(c.computed_confidence) || 0.75;\n\n  if (!cluster.needs_llm_consolidation) {\n    return { json: {\n      speaker_id:  cluster.speaker_id,\n      key_label:   c.key_label,\n      claim_text:  fallbackText,\n      confidence:  fallbackConf,\n      _needs_llm:  false\n    }};\n  }\n\n  const body = {\n    model: 'anthropic/claude-haiku-4-5',\n    temperature: 0.0,\n    max_tokens: 400,\n    messages: [\n      {\n        role: 'system',\n        content: 'You are consolidating possibly-duplicate profile facts about the same person.\\nGiven a list of observed facts, merge duplicates and resolve contradictions.\\nReturn a JSON array of final claims: [{\"key_label\": \"...\", \"claim_text\": \"key: value\", \"confidence\": 0.0-1.0}]\\nIf facts contradict each other, keep the most recent with lower confidence.\\nNever return more claims than you received candidates.'\n      },\n      {\n        role: 'user',\n        content: 'Candidates to consolidate:\\n' + JSON.stringify(\n          cluster.candidates.map(c => ({ key: c.key_label, value: c.all_values })), null, 2\n        )\n      }\n    ]\n  };\n\n  return { json: {\n    body,\n    speaker_id:  cluster.speaker_id,\n    key_label:   c.key_label,\n    claim_text:  fallbackText,\n    confidence:  fallbackConf,\n    _needs_llm:  true\n  }};\n});",
         "options": {},
         "mode": "runOnceForAllItems"
       },
@@ -172,7 +172,7 @@
           "parameters": [
             {
               "name": "HTTP-Referer",
-              "value": "http://localhost:5678"
+              "value": "http://YOUR_AERYS_HOST_IP:5678"
             },
             {
               "name": "X-Title",
@@ -195,7 +195,7 @@
       ],
       "credentials": {
         "openRouterApi": {
-          "id": "YOUR_OPENROUTER_CREDENTIAL_ID",
+          "id": "YOUR_OPEN_ROUTER_CREDENTIAL_ID",
           "name": "OpenRouter (Aerys)"
         }
       },
@@ -205,7 +205,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Process LLM responses for multi-candidate clusters\n// HTTP Request node replaces item with response body — speaker_id is lost.\n// Recover original metadata by matching back to Build Consolidation Request items.\nconst responses = $input.all();\n\n// Get only the _needs_llm:true originals, in order — these map 1:1 to LLM responses\nconst llmOriginals = $('Build Consolidation Request').all()\n  .filter(item => item.json._needs_llm === true)\n  .map(item => item.json);\n\nconst results = [];\n\nfor (let i = 0; i < responses.length; i++) {\n  const item = responses[i].json;\n  const orig = llmOriginals[i] || {};\n\n  const speaker_id = orig.speaker_id;\n  const key_label  = orig.key_label;\n  const fallback   = orig.claim_text;\n  const fallbackConf = orig.confidence || 0.5;\n\n  // LLM error or no choices — use embedded fallback data\n  if (item.error || !item.choices) {\n    results.push({ json: { speaker_id, key_label, claim_text: fallback, confidence: fallbackConf }});\n    continue;\n  }\n\n  // Parse LLM JSON response\n  let pushed = false;\n  try {\n    const text = item.choices[0]?.message?.content || '[]';\n    const claims = JSON.parse(text);\n    if (Array.isArray(claims) && claims.length > 0) {\n      claims.forEach(c => results.push({ json: {\n        speaker_id,\n        key_label:  c.key_label,\n        claim_text: c.claim_text,\n        confidence: c.confidence || 0.75\n      }}));\n      pushed = true;\n    }\n  } catch(e) {}\n\n  if (!pushed) {\n    results.push({ json: { speaker_id, key_label, claim_text: fallback, confidence: fallbackConf }});\n  }\n}\n\nreturn results;",
+        "jsCode": "// Process LLM responses for multi-candidate clusters\n// HTTP Request node replaces item with response body \u2014 speaker_id is lost.\n// Recover original metadata by matching back to Build Consolidation Request items.\nconst responses = $input.all();\n\n// Get only the _needs_llm:true originals, in order \u2014 these map 1:1 to LLM responses\nconst llmOriginals = $('Build Consolidation Request').all()\n  .filter(item => item.json._needs_llm === true)\n  .map(item => item.json);\n\nconst results = [];\n\nfor (let i = 0; i < responses.length; i++) {\n  const item = responses[i].json;\n  const orig = llmOriginals[i] || {};\n\n  const speaker_id = orig.speaker_id;\n  const key_label  = orig.key_label;\n  const fallback   = orig.claim_text;\n  const fallbackConf = orig.confidence || 0.5;\n\n  // LLM error or no choices \u2014 use embedded fallback data\n  if (item.error || !item.choices) {\n    results.push({ json: { speaker_id, key_label, claim_text: fallback, confidence: fallbackConf }});\n    continue;\n  }\n\n  // Parse LLM JSON response\n  let pushed = false;\n  try {\n    const text = item.choices[0]?.message?.content || '[]';\n    const claims = JSON.parse(text);\n    if (Array.isArray(claims) && claims.length > 0) {\n      claims.forEach(c => results.push({ json: {\n        speaker_id,\n        key_label:  c.key_label,\n        claim_text: c.claim_text,\n        confidence: c.confidence || 0.75\n      }}));\n      pushed = true;\n    }\n  } catch(e) {}\n\n  if (!pushed) {\n    results.push({ json: { speaker_id, key_label, claim_text: fallback, confidence: fallbackConf }});\n  }\n}\n\nreturn results;",
         "options": {},
         "mode": "runOnceForAllItems"
       },
@@ -501,7 +501,7 @@
   "settings": {
     "callerPolicy": "workflowsFromSameOwner",
     "availableInMCP": false,
-    "errorWorkflow": "YOUR_ERROR_HANDLER_WORKFLOW_ID"
+    "errorWorkflow": "YOUR_CENTRAL_ERROR_WORKFLOW_ID"
   },
   "staticData": {
     "node:Schedule Trigger": {
@@ -512,8 +512,8 @@
   "pinData": null,
   "versionId": "00000000-0000-0000-0000-000000000000",
   "activeVersionId": "00000000-0000-0000-0000-000000000000",
-  "versionCounter": 114,
-  "triggerCount": 1,
+  "versionCounter": 121,
+  "triggerCount": 0,
   "shared": [
     {
       "updatedAt": "2026-02-25T00:25:34.984Z",
@@ -681,7 +681,7 @@
       },
       {
         "parameters": {
-          "jsCode": "// Process ALL clusters — output one item per cluster\n// Embed fallback data in every item so Parse LLM Output never needs back-references\nconst allClusters = $input.all().map(i => i.json);\n\nreturn allClusters.map(cluster => {\n  const c = cluster.candidates[0];\n  const fallbackText  = c.key_label + ': ' + (c.all_values || '').split(' ||| ')[0];\n  const fallbackConf  = parseFloat(c.computed_confidence) || 0.75;\n\n  if (!cluster.needs_llm_consolidation) {\n    return { json: {\n      speaker_id:  cluster.speaker_id,\n      key_label:   c.key_label,\n      claim_text:  fallbackText,\n      confidence:  fallbackConf,\n      _needs_llm:  false\n    }};\n  }\n\n  const body = {\n    model: 'anthropic/claude-haiku-4-5',\n    temperature: 0.0,\n    max_tokens: 400,\n    messages: [\n      {\n        role: 'system',\n        content: 'You are consolidating possibly-duplicate profile facts about the same person.\\nGiven a list of observed facts, merge duplicates and resolve contradictions.\\nReturn a JSON array of final claims: [{\"key_label\": \"...\", \"claim_text\": \"key: value\", \"confidence\": 0.0-1.0}]\\nIf facts contradict each other, keep the most recent with lower confidence.\\nNever return more claims than you received candidates.'\n      },\n      {\n        role: 'user',\n        content: 'Candidates to consolidate:\\n' + JSON.stringify(\n          cluster.candidates.map(c => ({ key: c.key_label, value: c.all_values })), null, 2\n        )\n      }\n    ]\n  };\n\n  return { json: {\n    body,\n    speaker_id:  cluster.speaker_id,\n    key_label:   c.key_label,\n    claim_text:  fallbackText,\n    confidence:  fallbackConf,\n    _needs_llm:  true\n  }};\n});",
+          "jsCode": "// Process ALL clusters \u2014 output one item per cluster\n// Embed fallback data in every item so Parse LLM Output never needs back-references\nconst allClusters = $input.all().map(i => i.json);\n\nreturn allClusters.map(cluster => {\n  const c = cluster.candidates[0];\n  const fallbackText  = c.key_label + ': ' + (c.all_values || '').split(' ||| ')[0];\n  const fallbackConf  = parseFloat(c.computed_confidence) || 0.75;\n\n  if (!cluster.needs_llm_consolidation) {\n    return { json: {\n      speaker_id:  cluster.speaker_id,\n      key_label:   c.key_label,\n      claim_text:  fallbackText,\n      confidence:  fallbackConf,\n      _needs_llm:  false\n    }};\n  }\n\n  const body = {\n    model: 'anthropic/claude-haiku-4-5',\n    temperature: 0.0,\n    max_tokens: 400,\n    messages: [\n      {\n        role: 'system',\n        content: 'You are consolidating possibly-duplicate profile facts about the same person.\\nGiven a list of observed facts, merge duplicates and resolve contradictions.\\nReturn a JSON array of final claims: [{\"key_label\": \"...\", \"claim_text\": \"key: value\", \"confidence\": 0.0-1.0}]\\nIf facts contradict each other, keep the most recent with lower confidence.\\nNever return more claims than you received candidates.'\n      },\n      {\n        role: 'user',\n        content: 'Candidates to consolidate:\\n' + JSON.stringify(\n          cluster.candidates.map(c => ({ key: c.key_label, value: c.all_values })), null, 2\n        )\n      }\n    ]\n  };\n\n  return { json: {\n    body,\n    speaker_id:  cluster.speaker_id,\n    key_label:   c.key_label,\n    claim_text:  fallbackText,\n    confidence:  fallbackConf,\n    _needs_llm:  true\n  }};\n});",
           "options": {},
           "mode": "runOnceForAllItems"
         },
@@ -705,7 +705,7 @@
             "parameters": [
               {
                 "name": "HTTP-Referer",
-                "value": "http://localhost:5678"
+                "value": "http://YOUR_AERYS_HOST_IP:5678"
               },
               {
                 "name": "X-Title",
@@ -728,7 +728,7 @@
         ],
         "credentials": {
           "openRouterApi": {
-            "id": "YOUR_OPENROUTER_CREDENTIAL_ID",
+            "id": "YOUR_OPEN_ROUTER_CREDENTIAL_ID",
             "name": "OpenRouter (Aerys)"
           }
         },
@@ -738,7 +738,7 @@
       },
       {
         "parameters": {
-          "jsCode": "// Process LLM responses for multi-candidate clusters\n// HTTP Request node replaces item with response body — speaker_id is lost.\n// Recover original metadata by matching back to Build Consolidation Request items.\nconst responses = $input.all();\n\n// Get only the _needs_llm:true originals, in order — these map 1:1 to LLM responses\nconst llmOriginals = $('Build Consolidation Request').all()\n  .filter(item => item.json._needs_llm === true)\n  .map(item => item.json);\n\nconst results = [];\n\nfor (let i = 0; i < responses.length; i++) {\n  const item = responses[i].json;\n  const orig = llmOriginals[i] || {};\n\n  const speaker_id = orig.speaker_id;\n  const key_label  = orig.key_label;\n  const fallback   = orig.claim_text;\n  const fallbackConf = orig.confidence || 0.5;\n\n  // LLM error or no choices — use embedded fallback data\n  if (item.error || !item.choices) {\n    results.push({ json: { speaker_id, key_label, claim_text: fallback, confidence: fallbackConf }});\n    continue;\n  }\n\n  // Parse LLM JSON response\n  let pushed = false;\n  try {\n    const text = item.choices[0]?.message?.content || '[]';\n    const claims = JSON.parse(text);\n    if (Array.isArray(claims) && claims.length > 0) {\n      claims.forEach(c => results.push({ json: {\n        speaker_id,\n        key_label:  c.key_label,\n        claim_text: c.claim_text,\n        confidence: c.confidence || 0.75\n      }}));\n      pushed = true;\n    }\n  } catch(e) {}\n\n  if (!pushed) {\n    results.push({ json: { speaker_id, key_label, claim_text: fallback, confidence: fallbackConf }});\n  }\n}\n\nreturn results;",
+          "jsCode": "// Process LLM responses for multi-candidate clusters\n// HTTP Request node replaces item with response body \u2014 speaker_id is lost.\n// Recover original metadata by matching back to Build Consolidation Request items.\nconst responses = $input.all();\n\n// Get only the _needs_llm:true originals, in order \u2014 these map 1:1 to LLM responses\nconst llmOriginals = $('Build Consolidation Request').all()\n  .filter(item => item.json._needs_llm === true)\n  .map(item => item.json);\n\nconst results = [];\n\nfor (let i = 0; i < responses.length; i++) {\n  const item = responses[i].json;\n  const orig = llmOriginals[i] || {};\n\n  const speaker_id = orig.speaker_id;\n  const key_label  = orig.key_label;\n  const fallback   = orig.claim_text;\n  const fallbackConf = orig.confidence || 0.5;\n\n  // LLM error or no choices \u2014 use embedded fallback data\n  if (item.error || !item.choices) {\n    results.push({ json: { speaker_id, key_label, claim_text: fallback, confidence: fallbackConf }});\n    continue;\n  }\n\n  // Parse LLM JSON response\n  let pushed = false;\n  try {\n    const text = item.choices[0]?.message?.content || '[]';\n    const claims = JSON.parse(text);\n    if (Array.isArray(claims) && claims.length > 0) {\n      claims.forEach(c => results.push({ json: {\n        speaker_id,\n        key_label:  c.key_label,\n        claim_text: c.claim_text,\n        confidence: c.confidence || 0.75\n      }}));\n      pushed = true;\n    }\n  } catch(e) {}\n\n  if (!pushed) {\n    results.push({ json: { speaker_id, key_label, claim_text: fallback, confidence: fallbackConf }});\n  }\n}\n\nreturn results;",
           "options": {},
           "mode": "runOnceForAllItems"
         },
@@ -1031,27 +1031,11 @@
         ]
       }
     },
-    "authors": "Your Name",
+    "authors": [],
     "name": null,
     "description": null,
     "autosaved": false,
-    "workflowPublishHistory": [
-      {
-        "createdAt": "2026-03-18T03:13:41.206Z",
-        "id": 1303,
-        "workflowId": "YOUR_GUARDIAN_WORKFLOW_ID",
-        "versionId": "00000000-0000-0000-0000-000000000000",
-        "event": "deactivated",
-        "userId": "00000000-0000-0000-0000-000000000000"
-      },
-      {
-        "createdAt": "2026-03-18T03:13:41.281Z",
-        "id": 1304,
-        "workflowId": "YOUR_GUARDIAN_WORKFLOW_ID",
-        "versionId": "00000000-0000-0000-0000-000000000000",
-        "event": "activated",
-        "userId": "00000000-0000-0000-0000-000000000000"
-      }
-    ]
+    "workflowPublishHistory": [],
+    "id": "00000000-0000-0000-0000-000000000000"
   }
 }

@@ -1,6 +1,6 @@
 {
-  "updatedAt": "2026-01-01T00:00:00.000Z",
-  "createdAt": "2026-01-01T00:00:00.000Z",
+  "updatedAt": "2026-03-18T00:54:27.891Z",
+  "createdAt": "2026-02-24T01:14:40.469Z",
   "id": "04-02-memory-retrieval",
   "name": "04-02 Memory Retrieval",
   "description": null,
@@ -31,7 +31,7 @@
       ],
       "credentials": {
         "httpHeaderAuth": {
-          "id": "YOUR_OPENROUTER_HEADER_AUTH_ID",
+          "id": "YOUR_OPENROUTER_HEADER_AUTH_CREDENTIAL_ID",
           "name": "OpenRouter Header Auth"
         }
       },
@@ -45,7 +45,10 @@
         "rawContentType": "application/json",
         "body": "={{ JSON.stringify({ model: 'openai/text-embedding-3-small', input: $json.message_text || '' }) }}",
         "options": {}
-      }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
     },
     {
       "id": "mem-ret-build-01",
@@ -302,14 +305,15 @@
   "settings": {
     "executionOrder": "v1",
     "callerPolicy": "workflowsFromSameOwner",
-    "availableInMCP": false
+    "availableInMCP": false,
+    "errorWorkflow": "YOUR_CENTRAL_ERROR_WORKFLOW_ID"
   },
   "staticData": null,
   "meta": null,
   "pinData": null,
   "versionId": "00000000-0000-0000-0000-000000000000",
   "activeVersionId": "00000000-0000-0000-0000-000000000000",
-  "versionCounter": 54,
+  "versionCounter": 68,
   "triggerCount": 0,
   "shared": [
     {
@@ -332,8 +336,8 @@
   ],
   "tags": [],
   "activeVersion": {
-    "updatedAt": "2026-03-08T04:05:48.557Z",
-    "createdAt": "2026-03-08T04:05:48.557Z",
+    "updatedAt": "2026-03-18T00:54:27.893Z",
+    "createdAt": "2026-03-18T00:54:27.893Z",
     "versionId": "00000000-0000-0000-0000-000000000000",
     "workflowId": "YOUR_MEMORY_RETRIEVAL_WORKFLOW_ID",
     "nodes": [
@@ -361,7 +365,7 @@
         ],
         "credentials": {
           "httpHeaderAuth": {
-            "id": "YOUR_OPENROUTER_HEADER_AUTH_ID",
+            "id": "YOUR_OPENROUTER_HEADER_AUTH_CREDENTIAL_ID",
             "name": "OpenRouter Header Auth"
           }
         },
@@ -375,7 +379,10 @@
           "rawContentType": "application/json",
           "body": "={{ JSON.stringify({ model: 'openai/text-embedding-3-small', input: $json.message_text || '' }) }}",
           "options": {}
-        }
+        },
+        "retryOnFail": true,
+        "maxTries": 3,
+        "waitBetweenTries": 2000
       },
       {
         "id": "mem-ret-build-01",
@@ -629,43 +636,11 @@
         ]
       }
     },
-    "authors": "Your Name",
+    "authors": [],
     "name": null,
     "description": null,
     "autosaved": false,
-    "workflowPublishHistory": [
-      {
-        "createdAt": "2026-03-08T04:05:48.668Z",
-        "id": 1146,
-        "workflowId": "YOUR_MEMORY_RETRIEVAL_WORKFLOW_ID",
-        "versionId": "00000000-0000-0000-0000-000000000000",
-        "event": "deactivated",
-        "userId": "00000000-0000-0000-0000-000000000000"
-      },
-      {
-        "createdAt": "2026-03-08T04:05:48.733Z",
-        "id": 1147,
-        "workflowId": "YOUR_MEMORY_RETRIEVAL_WORKFLOW_ID",
-        "versionId": "00000000-0000-0000-0000-000000000000",
-        "event": "activated",
-        "userId": "00000000-0000-0000-0000-000000000000"
-      },
-      {
-        "createdAt": "2026-03-08T04:05:48.937Z",
-        "id": 1148,
-        "workflowId": "YOUR_MEMORY_RETRIEVAL_WORKFLOW_ID",
-        "versionId": "00000000-0000-0000-0000-000000000000",
-        "event": "deactivated",
-        "userId": "00000000-0000-0000-0000-000000000000"
-      },
-      {
-        "createdAt": "2026-03-08T04:05:49.077Z",
-        "id": 1149,
-        "workflowId": "YOUR_MEMORY_RETRIEVAL_WORKFLOW_ID",
-        "versionId": "00000000-0000-0000-0000-000000000000",
-        "event": "activated",
-        "userId": "00000000-0000-0000-0000-000000000000"
-      }
-    ]
+    "workflowPublishHistory": [],
+    "id": "00000000-0000-0000-0000-000000000000"
   }
 }

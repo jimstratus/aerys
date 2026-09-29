@@ -1,0 +1,941 @@
+{
+  "updatedAt": "2026-01-01T00:00:00.000Z",
+  "createdAt": "2026-01-01T00:00:00.000Z",
+  "id": "04-03-override-api",
+  "name": "04-03 Override API",
+  "description": null,
+  "active": true,
+  "isArchived": false,
+  "nodes": [
+    {
+      "id": "override-webhook-01",
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        240,
+        300
+      ],
+      "parameters": {
+        "path": "aerys-override-api",
+        "httpMethod": "POST",
+        "responseMode": "responseNode",
+        "webhookId": "a1b2c3d4-0002-0002-0002-000000000002"
+      },
+      "webhookId": "00000000-0000-0000-0000-000000000000"
+    },
+    {
+      "id": "override-route-01",
+      "name": "Route by Action",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [
+        460,
+        300
+      ],
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": false,
+                  "leftValue": "",
+                  "typeValidation": "strict"
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.body.action }}",
+                    "rightValue": "lock",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "lock"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": false,
+                  "leftValue": "",
+                  "typeValidation": "strict"
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.body.action }}",
+                    "rightValue": "retract",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "retract"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": false,
+                  "leftValue": "",
+                  "typeValidation": "strict"
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.body.action }}",
+                    "rightValue": "correct",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "correct"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": false,
+                  "leftValue": "",
+                  "typeValidation": "strict"
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.body.action }}",
+                    "rightValue": "add",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "add"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "override-lock-01",
+      "name": "Lock Handler",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        700,
+        100
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE core_claim SET locked = true, status = 'approved'\nWHERE core_id = $1::uuid AND speaker_id = $2::uuid",
+        "options": {
+          "queryReplacement": "={{ [$json.body.core_id, $json.body.speaker_id] }}"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "id": "YOUR_POSTGRES_CREDENTIAL_ID",
+          "name": "Aerys DB (aerys)"
+        }
+      }
+    },
+    {
+      "id": "override-retract-01",
+      "name": "Retract Handler",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        700,
+        240
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE core_claim SET status = 'proposed', locked = false, confidence = 0\nWHERE core_id = $1::uuid AND speaker_id = $2::uuid",
+        "options": {
+          "queryReplacement": "={{ [$json.body.core_id, $json.body.speaker_id] }}"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "id": "YOUR_POSTGRES_CREDENTIAL_ID",
+          "name": "Aerys DB (aerys)"
+        }
+      }
+    },
+    {
+      "id": "override-correct-01",
+      "name": "Correct Handler",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        700,
+        380
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE core_claim\nSET claim_text = $3, value_norm = $4::jsonb, status = 'approved', locked = true, last_seen = NOW()\nWHERE core_id = $1::uuid AND speaker_id = $2::uuid",
+        "options": {
+          "queryReplacement": "={{ [$json.body.core_id, $json.body.speaker_id, $json.body.new_value, JSON.stringify({corrected: true})] }}"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "id": "YOUR_POSTGRES_CREDENTIAL_ID",
+          "name": "Aerys DB (aerys)"
+        }
+      }
+    },
+    {
+      "id": "override-add-01",
+      "name": "Add Handler",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        700,
+        520
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO core_claim (speaker_id, key_label, claim_text, status, confidence, locked, sensitivity, visibility)\nVALUES ($1::uuid, $2, $3, 'approved', 0.95, true, 'P2', 'server')\nON CONFLICT (speaker_id, key_label) DO UPDATE SET\n  claim_text = EXCLUDED.claim_text,\n  status = 'approved',\n  locked = true,\n  last_seen = NOW()",
+        "options": {
+          "queryReplacement": "={{ [$json.body.speaker_id, $json.body.key_label || 'user.stated', $json.body.claim_text] }}"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "id": "YOUR_POSTGRES_CREDENTIAL_ID",
+          "name": "Aerys DB (aerys)"
+        }
+      }
+    },
+    {
+      "id": "override-error-01",
+      "name": "Error Handler",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        700,
+        660
+      ],
+      "parameters": {
+        "jsCode": "return [{ json: { success: false, error: 'Unknown action: ' + ($json.body?.action || 'undefined') } }];"
+      }
+    },
+    {
+      "id": "override-audit-01",
+      "name": "Write Audit Log",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        1180,
+        300
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO audit_log (who, action, details)\nVALUES ('user', $1, $2::jsonb)",
+        "options": {
+          "queryReplacement": "={{ [$json.audit_action, $json.audit_details] }}"
+        },
+        "onError": "continueRegularOutput"
+      },
+      "credentials": {
+        "postgres": {
+          "id": "YOUR_POSTGRES_CREDENTIAL_ID",
+          "name": "Aerys DB (aerys)"
+        }
+      }
+    },
+    {
+      "id": "override-build-response-01",
+      "name": "Build Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1400,
+        300
+      ],
+      "parameters": {
+        "jsCode": "const body = $('Webhook Trigger').first().json.body || {};\nreturn [{ json: { success: true, action: body.action, core_id: body.core_id } }];"
+      }
+    },
+    {
+      "id": "override-respond-01",
+      "name": "Respond",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        1620,
+        300
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": {
+          "responseCode": 200
+        }
+      }
+    },
+    {
+      "id": "override-prep-audit-01",
+      "name": "Prepare Audit Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        960,
+        300
+      ],
+      "parameters": {
+        "jsCode": "// Recover the original webhook body for audit logging\n// Items coming from handler nodes may not have body - check multiple sources\nlet body = $json.body || {};\n// If body is empty (handler nodes strip context), try the first item from webhook\nconst webhookItems = $('Webhook Trigger').all();\nif (webhookItems.length > 0 && webhookItems[0].json.body) {\n  body = webhookItems[0].json.body;\n}\nreturn [{\n  json: {\n    audit_action: body.action || 'unknown',\n    audit_details: JSON.stringify(body)\n  }\n}];"
+      }
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": {
+      "main": [
+        [
+          {
+            "node": "Route by Action",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route by Action": {
+      "main": [
+        [
+          {
+            "node": "Lock Handler",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Retract Handler",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Correct Handler",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Add Handler",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Error Handler",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Lock Handler": {
+      "main": [
+        [
+          {
+            "node": "Prepare Audit Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Retract Handler": {
+      "main": [
+        [
+          {
+            "node": "Prepare Audit Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Correct Handler": {
+      "main": [
+        [
+          {
+            "node": "Prepare Audit Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Add Handler": {
+      "main": [
+        [
+          {
+            "node": "Prepare Audit Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Error Handler": {
+      "main": [
+        [
+          {
+            "node": "Build Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Write Audit Log": {
+      "main": [
+        [
+          {
+            "node": "Build Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Response": {
+      "main": [
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Audit Data": {
+      "main": [
+        [
+          {
+            "node": "Write Audit Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  },
+  "staticData": null,
+  "meta": null,
+  "pinData": null,
+  "versionId": "00000000-0000-0000-0000-000000000000",
+  "activeVersionId": "00000000-0000-0000-0000-000000000000",
+  "versionCounter": 9,
+  "triggerCount": 1,
+  "shared": [
+    {
+      "updatedAt": "2026-02-25T21:44:24.331Z",
+      "createdAt": "2026-02-25T21:44:24.331Z",
+      "role": "workflow:owner",
+      "workflowId": "YOUR_OVERRIDE_API_WORKFLOW_ID",
+      "projectId": "YOUR_N8N_PROJECT_ID",
+      "project": {
+        "updatedAt": "2026-01-01T00:00:00.000Z",
+        "createdAt": "2026-01-01T00:00:00.000Z",
+        "id": "YOUR_N8N_PROJECT_ID",
+        "name": "Your Project",
+        "type": "personal",
+        "icon": null,
+        "description": null,
+        "creatorId": "00000000-0000-0000-0000-000000000000"
+      }
+    }
+  ],
+  "tags": [],
+  "activeVersion": {
+    "updatedAt": "2026-02-25T23:24:45.817Z",
+    "createdAt": "2026-02-25T23:24:45.817Z",
+    "versionId": "00000000-0000-0000-0000-000000000000",
+    "workflowId": "YOUR_OVERRIDE_API_WORKFLOW_ID",
+    "nodes": [
+      {
+        "id": "override-webhook-01",
+        "name": "Webhook Trigger",
+        "type": "n8n-nodes-base.webhook",
+        "typeVersion": 2,
+        "position": [
+          240,
+          300
+        ],
+        "parameters": {
+          "path": "aerys-override-api",
+          "httpMethod": "POST",
+          "responseMode": "responseNode",
+          "webhookId": "a1b2c3d4-0002-0002-0002-000000000002"
+        },
+        "webhookId": "a1b2c3d4-0002-0002-0002-000000000002"
+      },
+      {
+        "id": "override-route-01",
+        "name": "Route by Action",
+        "type": "n8n-nodes-base.switch",
+        "typeVersion": 3,
+        "position": [
+          460,
+          300
+        ],
+        "parameters": {
+          "rules": {
+            "values": [
+              {
+                "conditions": {
+                  "options": {
+                    "caseSensitive": false,
+                    "leftValue": "",
+                    "typeValidation": "strict"
+                  },
+                  "conditions": [
+                    {
+                      "leftValue": "={{ $json.body.action }}",
+                      "rightValue": "lock",
+                      "operator": {
+                        "type": "string",
+                        "operation": "equals"
+                      }
+                    }
+                  ],
+                  "combinator": "and"
+                },
+                "renameOutput": true,
+                "outputKey": "lock"
+              },
+              {
+                "conditions": {
+                  "options": {
+                    "caseSensitive": false,
+                    "leftValue": "",
+                    "typeValidation": "strict"
+                  },
+                  "conditions": [
+                    {
+                      "leftValue": "={{ $json.body.action }}",
+                      "rightValue": "retract",
+                      "operator": {
+                        "type": "string",
+                        "operation": "equals"
+                      }
+                    }
+                  ],
+                  "combinator": "and"
+                },
+                "renameOutput": true,
+                "outputKey": "retract"
+              },
+              {
+                "conditions": {
+                  "options": {
+                    "caseSensitive": false,
+                    "leftValue": "",
+                    "typeValidation": "strict"
+                  },
+                  "conditions": [
+                    {
+                      "leftValue": "={{ $json.body.action }}",
+                      "rightValue": "correct",
+                      "operator": {
+                        "type": "string",
+                        "operation": "equals"
+                      }
+                    }
+                  ],
+                  "combinator": "and"
+                },
+                "renameOutput": true,
+                "outputKey": "correct"
+              },
+              {
+                "conditions": {
+                  "options": {
+                    "caseSensitive": false,
+                    "leftValue": "",
+                    "typeValidation": "strict"
+                  },
+                  "conditions": [
+                    {
+                      "leftValue": "={{ $json.body.action }}",
+                      "rightValue": "add",
+                      "operator": {
+                        "type": "string",
+                        "operation": "equals"
+                      }
+                    }
+                  ],
+                  "combinator": "and"
+                },
+                "renameOutput": true,
+                "outputKey": "add"
+              }
+            ]
+          },
+          "options": {}
+        }
+      },
+      {
+        "id": "override-lock-01",
+        "name": "Lock Handler",
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.5,
+        "position": [
+          700,
+          100
+        ],
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "UPDATE core_claim SET locked = true, status = 'approved'\nWHERE core_id = $1::uuid AND speaker_id = $2::uuid",
+          "options": {
+            "queryReplacement": "={{ [$json.body.core_id, $json.body.speaker_id] }}"
+          }
+        },
+        "credentials": {
+          "postgres": {
+            "id": "YOUR_POSTGRES_CREDENTIAL_ID",
+            "name": "Aerys DB (aerys)"
+          }
+        }
+      },
+      {
+        "id": "override-retract-01",
+        "name": "Retract Handler",
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.5,
+        "position": [
+          700,
+          240
+        ],
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "UPDATE core_claim SET status = 'proposed', locked = false, confidence = 0\nWHERE core_id = $1::uuid AND speaker_id = $2::uuid",
+          "options": {
+            "queryReplacement": "={{ [$json.body.core_id, $json.body.speaker_id] }}"
+          }
+        },
+        "credentials": {
+          "postgres": {
+            "id": "YOUR_POSTGRES_CREDENTIAL_ID",
+            "name": "Aerys DB (aerys)"
+          }
+        }
+      },
+      {
+        "id": "override-correct-01",
+        "name": "Correct Handler",
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.5,
+        "position": [
+          700,
+          380
+        ],
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "UPDATE core_claim\nSET claim_text = $3, value_norm = $4::jsonb, status = 'approved', locked = true, last_seen = NOW()\nWHERE core_id = $1::uuid AND speaker_id = $2::uuid",
+          "options": {
+            "queryReplacement": "={{ [$json.body.core_id, $json.body.speaker_id, $json.body.new_value, JSON.stringify({corrected: true})] }}"
+          }
+        },
+        "credentials": {
+          "postgres": {
+            "id": "YOUR_POSTGRES_CREDENTIAL_ID",
+            "name": "Aerys DB (aerys)"
+          }
+        }
+      },
+      {
+        "id": "override-add-01",
+        "name": "Add Handler",
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.5,
+        "position": [
+          700,
+          520
+        ],
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "INSERT INTO core_claim (speaker_id, key_label, claim_text, status, confidence, locked, sensitivity, visibility)\nVALUES ($1::uuid, $2, $3, 'approved', 0.95, true, 'P2', 'server')\nON CONFLICT (speaker_id, key_label) DO UPDATE SET\n  claim_text = EXCLUDED.claim_text,\n  status = 'approved',\n  locked = true,\n  last_seen = NOW()",
+          "options": {
+            "queryReplacement": "={{ [$json.body.speaker_id, $json.body.key_label || 'user.stated', $json.body.claim_text] }}"
+          }
+        },
+        "credentials": {
+          "postgres": {
+            "id": "YOUR_POSTGRES_CREDENTIAL_ID",
+            "name": "Aerys DB (aerys)"
+          }
+        }
+      },
+      {
+        "id": "override-error-01",
+        "name": "Error Handler",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          700,
+          660
+        ],
+        "parameters": {
+          "jsCode": "return [{ json: { success: false, error: 'Unknown action: ' + ($json.body?.action || 'undefined') } }];"
+        }
+      },
+      {
+        "id": "override-audit-01",
+        "name": "Write Audit Log",
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.5,
+        "position": [
+          1180,
+          300
+        ],
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "INSERT INTO audit_log (who, action, details)\nVALUES ('user', $1, $2::jsonb)",
+          "options": {
+            "queryReplacement": "={{ [$json.audit_action, $json.audit_details] }}"
+          },
+          "onError": "continueRegularOutput"
+        },
+        "credentials": {
+          "postgres": {
+            "id": "YOUR_POSTGRES_CREDENTIAL_ID",
+            "name": "Aerys DB (aerys)"
+          }
+        }
+      },
+      {
+        "id": "override-build-response-01",
+        "name": "Build Response",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1400,
+          300
+        ],
+        "parameters": {
+          "jsCode": "const body = $('Webhook Trigger').first().json.body || {};\nreturn [{ json: { success: true, action: body.action, core_id: body.core_id } }];"
+        }
+      },
+      {
+        "id": "override-respond-01",
+        "name": "Respond",
+        "type": "n8n-nodes-base.respondToWebhook",
+        "typeVersion": 1,
+        "position": [
+          1620,
+          300
+        ],
+        "parameters": {
+          "respondWith": "json",
+          "responseBody": "={{ $json }}",
+          "options": {
+            "responseCode": 200
+          }
+        }
+      },
+      {
+        "id": "override-prep-audit-01",
+        "name": "Prepare Audit Data",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          960,
+          300
+        ],
+        "parameters": {
+          "jsCode": "// Recover the original webhook body for audit logging\n// Items coming from handler nodes may not have body - check multiple sources\nlet body = $json.body || {};\n// If body is empty (handler nodes strip context), try the first item from webhook\nconst webhookItems = $('Webhook Trigger').all();\nif (webhookItems.length > 0 && webhookItems[0].json.body) {\n  body = webhookItems[0].json.body;\n}\nreturn [{\n  json: {\n    audit_action: body.action || 'unknown',\n    audit_details: JSON.stringify(body)\n  }\n}];"
+        }
+      }
+    ],
+    "connections": {
+      "Webhook Trigger": {
+        "main": [
+          [
+            {
+              "node": "Route by Action",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Route by Action": {
+        "main": [
+          [
+            {
+              "node": "Lock Handler",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Retract Handler",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Correct Handler",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Add Handler",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Error Handler",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Lock Handler": {
+        "main": [
+          [
+            {
+              "node": "Prepare Audit Data",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Retract Handler": {
+        "main": [
+          [
+            {
+              "node": "Prepare Audit Data",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Correct Handler": {
+        "main": [
+          [
+            {
+              "node": "Prepare Audit Data",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Add Handler": {
+        "main": [
+          [
+            {
+              "node": "Prepare Audit Data",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Error Handler": {
+        "main": [
+          [
+            {
+              "node": "Build Response",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Write Audit Log": {
+        "main": [
+          [
+            {
+              "node": "Build Response",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Build Response": {
+        "main": [
+          [
+            {
+              "node": "Respond",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Prepare Audit Data": {
+        "main": [
+          [
+            {
+              "node": "Write Audit Log",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "authors": "Your Name",
+    "name": null,
+    "description": null,
+    "autosaved": false,
+    "workflowPublishHistory": [
+      {
+        "createdAt": "2026-02-25T23:24:45.926Z",
+        "id": 663,
+        "workflowId": "YOUR_OVERRIDE_API_WORKFLOW_ID",
+        "versionId": "00000000-0000-0000-0000-000000000000",
+        "event": "deactivated",
+        "userId": "00000000-0000-0000-0000-000000000000"
+      },
+      {
+        "createdAt": "2026-02-25T23:24:45.977Z",
+        "id": 664,
+        "workflowId": "YOUR_OVERRIDE_API_WORKFLOW_ID",
+        "versionId": "00000000-0000-0000-0000-000000000000",
+        "event": "activated",
+        "userId": "00000000-0000-0000-0000-000000000000"
+      }
+    ]
+  }
+}

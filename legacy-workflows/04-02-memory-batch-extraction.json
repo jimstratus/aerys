@@ -1,0 +1,855 @@
+{
+  "name": "04-02 Memory Batch Extraction",
+  "nodes": [
+    {
+      "id": "batch-schedule-01",
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 1
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "batch-precheck-01",
+      "name": "Pre-check Message Source",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        260,
+        0
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "YOUR_POSTGRES_CREDENTIAL_ID",
+          "name": "Aerys DB (aerys)"
+        }
+      },
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT\n  (SELECT COUNT(*) FROM information_schema.tables WHERE table_name = 'messages') AS messages_table_exists,\n  (SELECT COUNT(*) FROM information_schema.columns WHERE table_name = 'messages' AND column_name = 'content') AS messages_has_content,\n  (SELECT COUNT(*) FROM information_schema.columns WHERE table_name = 'messages' AND column_name = 'person_id') AS messages_has_person_id,\n  (SELECT COUNT(*) FROM messages) AS messages_row_count;",
+        "options": {}
+      }
+    },
+    {
+      "id": "batch-route-source-01",
+      "name": "Route to Message Source",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        520,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "combinator": "and"
+          },
+          "conditions": [
+            {
+              "id": "has-messages-table",
+              "leftValue": "={{ $json.messages_has_content }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            },
+            {
+              "id": "has-messages-rows",
+              "leftValue": "={{ $json.messages_row_count }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "batch-fetch-messages-01",
+      "name": "Fetch Unprocessed Messages",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        780,
+        -150
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "YOUR_POSTGRES_CREDENTIAL_ID",
+          "name": "Aerys DB (aerys)"
+        }
+      },
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT \n  m.id, \n  m.person_id, \n  m.content, \n  m.channel AS source_platform,\n  'public' AS privacy_level,\n  m.created_at,\n  p.display_name AS speaker_name\nFROM messages m\nLEFT JOIN persons p ON p.id = m.person_id\nWHERE m.created_at >= NOW() - INTERVAL '2 hours'\n  AND m.content IS NOT NULL AND m.content != ''\n  AND m.role = 'human'\nORDER BY m.created_at ASC\nLIMIT 200;",
+        "options": {}
+      }
+    },
+    {
+      "id": "batch-fetch-histories-01",
+      "name": "Fetch from n8n_chat_histories",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        780,
+        150
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "YOUR_POSTGRES_CREDENTIAL_ID",
+          "name": "Aerys DB (aerys)"
+        }
+      },
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH valid_sessions AS (\n  SELECT session_id\n  FROM n8n_chat_histories\n  WHERE session_id ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'\n  GROUP BY session_id\n)\nSELECT\n  h.id::text AS id,\n  vs.session_id::uuid AS person_id,\n  (h.message->>'content') AS content,\n  'discord' AS source_platform,\n  'private' AS privacy_level,\n  NOW() AS created_at,\n  COALESCE(pers.display_name, 'Unknown') AS speaker_name\nFROM n8n_chat_histories h\nJOIN valid_sessions vs ON vs.session_id = h.session_id\nLEFT JOIN persons pers ON pers.id = vs.session_id::uuid\nWHERE (h.message->>'type') = 'human'\n  AND h.message->>'content' IS NOT NULL\n  AND h.message->>'content' != ''\nORDER BY h.id DESC\nLIMIT 200;",
+        "options": {}
+      }
+    },
+    {
+      "id": "batch-check-has-msgs-01",
+      "name": "Check Has Messages",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1040,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "has-rows",
+              "leftValue": "={{ $json.content }}",
+              "rightValue": null,
+              "operator": {
+                "type": "string",
+                "operation": "isNotEmpty"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "batch-done-noop",
+      "name": "Done (No Messages)",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1040,
+        200
+      ],
+      "parameters": {
+        "mode": "manual",
+        "include": "none",
+        "fields": {
+          "values": [
+            {
+              "name": "status",
+              "type": "stringValue",
+              "value": "done"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "batch-guard-person-id",
+      "name": "Guard: Skip NULL person_id",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1300,
+        -100
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "has-person-id",
+              "leftValue": "={{ $json.person_id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEquals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "batch-group-msgs-01",
+      "name": "Group Messages",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1560,
+        -100
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const rows = $input.all().map(i => i.json);\n\n// Group by person_id first\nconst byPerson = {};\nfor (const row of rows) {\n  const pid = row.person_id;\n  if (!pid) continue;\n  if (!byPerson[pid]) byPerson[pid] = [];\n  byPerson[pid].push(row);\n}\n\n// Then batch each person's messages (max 20 per batch)\nconst output = [];\nfor (const [pid, msgs] of Object.entries(byPerson)) {\n  for (let i = 0; i < msgs.length; i += 20) {\n    const batch = msgs.slice(i, i + 20);\n    output.push({\n      json: {\n        messages: batch,\n        source_platform: batch[0]?.source_platform || 'discord',\n        source_privacy: batch[0]?.source_privacy || 'public',\n        person_id: pid\n      }\n    });\n  }\n}\nreturn output;"
+      }
+    },
+    {
+      "id": "batch-build-extract-req-01",
+      "name": "Build Extraction Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1820,
+        -100
+      ],
+      "parameters": {
+        "jsCode": "const group = $input.first().json;\nconst transcript = group.messages.map(m =>\n  `[${m.speaker_name || 'Unknown'}]: ${m.content}`\n).join('\\n');\n\nconst body = {\n  model: 'anthropic/claude-haiku-4.5',\n  temperature: 0.1,\n  max_tokens: 1200,\n  messages: [\n    {\n      role: 'system',\n      content: `You extract memories from conversation transcripts. Return a JSON array only -- no preamble, no explanation.\n\n## What to EXTRACT (must have lasting value):\n- Stable identity facts: name, location, job, relationships, gender, age\n- Genuine interests with signal: hobbies, games, media, projects they care about\n- Meaningful life events with context: trips, purchases, celebrations, milestones\n- Stated preferences for Aerys: how they want to be addressed, communication style\n- Vehicle, home, pet details: specific and memorable\n\n## What to REJECT (ephemeral noise -- do NOT extract):\n- Transient actions: \"going to bed\", \"grabbing coffee\", \"brb\"\n- Session-specific decisions: \"parking this bug\", \"let's do X next\"\n- Meta-commentary about the system: \"the bot is broken\", \"that workflow failed\"\n- Timestamps without facts: \"it's late\", \"been a long day\"\n- Greetings and smalltalk: \"hey\", \"what's up\", \"how are you\"\n\n## Return format:\n[{\"key_label\":\"category.attribute\",\"value_text\":\"the fact itself, naturally phrased\",\"context\":\"why/how this came up in conversation (1 sentence, optional for stable facts)\",\"event_date\":\"when this happened if mentioned (e.g. 'Feb 28', 'last week', null if not stated)\",\"privacy_level\":\"public|private\",\"asserted_by\":\"self|third_party\",\"confidence\":0.0}]\n\n## key_label rules:\n- Generic prefixes ONLY: basic, user, work, vehicle, interest, relationship, preference, event\n- NEVER use a person's name as prefix\n- Examples: basic.location, user.vehicle, interest.game, event.trip, preference.communication\n\n## value_text rules:\n- Write naturally, as a human would remember it -- NOT as a database entry\n- BAD: \"Dodge Ram\"  GOOD: \"Interested in a Dodge Ram truck\"\n- BAD: \"Rotonda West\"  GOOD: \"Lives in Rotonda West, Florida\"\n- For interests, include what makes it notable: \"Collects retro games, especially SNES titles\"\n\n## context rules:\n- 1 sentence max, captures the conversational moment\n- Include for interests, events, preferences. Skip for basic identity facts.\n- BAD: \"mentioned in conversation\"  GOOD: \"came up while joking about RAM prices\"\n- If the conversation is mundane, context is null\n\n## privacy_level rules:\n- \"public\": name, job, location, hobbies, vehicle, interests, general life facts\n- \"private\": health details, financial specifics, relationship struggles, personal traumas, sexual orientation\n- Source channel (DM vs public) is context, not a rule\n\nIf nothing worth remembering, return [].`\n    },\n    {\n      role: 'user',\n      content: `Extract observations from this conversation:\\n\\n${transcript}`\n    }\n  ]\n};\n\nreturn [{ json: { body, source_platform: group.source_platform, source_privacy: group.source_privacy, person_id: group.person_id, message_ids: group.messages.map(m => m.id) } }];"
+      }
+    },
+    {
+      "id": "batch-call-llm-01",
+      "name": "Call LLM for Extraction",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2080,
+        -100
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "YOUR_OPENROUTER_HEADER_AUTH_ID",
+          "name": "OpenRouter Header Auth"
+        }
+      },
+      "parameters": {
+        "method": "POST",
+        "url": "https://openrouter.ai/api/v1/chat/completions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify($json.body) }}",
+        "options": {}
+      }
+    },
+    {
+      "id": "batch-parse-obs-01",
+      "name": "Parse Observations",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2340,
+        -100
+      ],
+      "parameters": {
+        "jsCode": "const result = $input.first().json;\nconst upstream = $('Build Extraction Request').first().json;\n\n// Get batch date from Group Messages \u2014 latest created_at as fallback event_date\nconst groupMsgs = $('Group Messages').first().json.messages || [];\nlet batchDate = null;\nif (groupMsgs.length > 0) {\n  const latest = groupMsgs.reduce((a, b) =>\n    new Date(a.created_at) > new Date(b.created_at) ? a : b\n  );\n  if (latest.created_at) {\n    const d = new Date(latest.created_at);\n    // Format in user's timezone (America/New_York)\n    const parts = d.toLocaleDateString('en-US', {\n      timeZone: 'America/New_York',\n      month: 'short',\n      day: 'numeric'\n    }).split(' ');\n    batchDate = parts.join(' ');\n  }\n}\n\nlet observations = [];\ntry {\n  let text = result.choices?.[0]?.message?.content || '[]';\n  text = text.replace(/^```(?:json)?\\n?/m, '').replace(/\\n?```$/m, '').trim();\n  observations = JSON.parse(text);\n} catch(e) { observations = []; }\n\nif (!Array.isArray(observations) || observations.length === 0) {\n  return [{ json: { skip: true } }];\n}\n\nreturn observations.map(obs => {\n  const event_date = obs.event_date || batchDate;\n\n  const new_content = (obs.key_label || '') + ': ' + (obs.value_text || '')\n    + (obs.context ? ' -- ' + obs.context : '')\n    + (event_date ? ' (' + event_date + ')' : '');\n\n  return {\n    json: {\n      key_label: obs.key_label,\n      value_text: obs.value_text,\n      context: obs.context || null,\n      event_date: event_date,\n      new_content: new_content,\n      privacy_level: obs.privacy_level || upstream.source_privacy || 'public',\n      asserted_by: obs.asserted_by || 'self',\n      confidence: obs.confidence !== undefined ? obs.confidence : 0.5,\n      source_platform: upstream.source_platform || 'discord',\n      person_id: upstream.person_id,\n      message_ids: upstream.message_ids\n    }\n  };\n});"
+      }
+    },
+    {
+      "id": "batch-guard-skip-01",
+      "name": "Guard: Skip If Empty",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        2600,
+        -100
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "not-skip",
+              "leftValue": "={{ $json.skip }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "notEquals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "batch-embed-obs-01",
+      "name": "Embed Observation",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3580,
+        -300
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "YOUR_OPENROUTER_HEADER_AUTH_ID",
+          "name": "OpenRouter Header Auth"
+        }
+      },
+      "parameters": {
+        "method": "POST",
+        "url": "https://openrouter.ai/api/v1/embeddings",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ model: 'openai/text-embedding-3-small', input: $json.new_content || (($json.key_label || '') + ': ' + ($json.value_text || '')) }) }}",
+        "options": {}
+      }
+    },
+    {
+      "id": "batch-guard-person-id-2",
+      "name": "Guard: Skip NULL person_id (Insert)",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        3780,
+        -300
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "has-person",
+              "leftValue": "={{ $('Parse Observations').first().json.person_id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEquals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "batch-insert-memory-01",
+      "name": "Insert Memory",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        4940,
+        -300
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "YOUR_POSTGRES_CREDENTIAL_ID",
+          "name": "Aerys DB (aerys)"
+        }
+      },
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH soft_del AS (\n  UPDATE memories SET deleted_at = NOW()\n  WHERE id = $9::uuid AND $10 = 'replace' AND deleted_at IS NULL\n  RETURNING id\n)\nINSERT INTO memories (person_id, content, key_label, context, event_date, embedding, source_platform, privacy_level, created_at)\nVALUES (\n  $1::uuid,\n  $2,\n  $3,\n  $4,\n  $5,\n  $6::vector,\n  $7,\n  $8,\n  NOW()\n)\nON CONFLICT DO NOTHING;",
+        "options": {
+          "queryReplacement": "={{ [$json.person_id, $json.content, $json.key_label, $json.context, $json.event_date, $json.embedding_str, $json.source_platform, $json.privacy_level, $json.existing_id || '00000000-0000-0000-0000-000000000000', $json.action || 'insert'] }}"
+        }
+      }
+    },
+    {
+      "id": "batch-check-messages-path",
+      "name": "Check Messages Table Path",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        5140,
+        -300
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "always-skip",
+              "leftValue": "={{ true }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "batch-prep-insert-01",
+      "name": "Prepare Insert Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3980,
+        -300
+      ],
+      "parameters": {
+        "jsCode": "// Merge each embedding result with its corresponding observation context (by index)\nconst embedItems = $input.all();\nconst ctxItems = $('Pre-Embed Context').all();\n\nreturn embedItems.map((embedItem, idx) => {\n  const embedding = embedItem.json.data?.[0]?.embedding || [];\n  const embeddingStr = '[' + embedding.join(',') + ']';\n  const ctxData = ctxItems[idx]?.json || {};\n\n  return {\n    json: {\n      person_id: ctxData.person_id,\n      content: ctxData.new_content,\n      key_label: ctxData.key_label,\n      context: ctxData.context,\n      event_date: ctxData.event_date,\n      embedding_str: embeddingStr,\n      source_platform: ctxData.source_platform || 'discord',\n      privacy_level: ctxData.privacy_level || 'public',\n      action: ctxData.action,\n      existing_id: ctxData.existing_id\n    }\n  };\n});"
+      }
+    },
+    {
+      "id": "insert-userinfo-001",
+      "name": "Insert Userinfo",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        2860,
+        140
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO userinfo (speaker_id, key_label, value_text, model_conf, asserted_by, sensitivity, last_seen)\nVALUES ($1::uuid, $2, $3, $4::numeric, $5, $6, NOW());",
+        "options": {
+          "queryReplacement": "={{ [$json.person_id, $json.key_label, $json.value_text, $json.confidence !== undefined ? $json.confidence : 0.5, $json.asserted_by || 'third_party', $json.privacy_level === 'private' ? 'P3' : 'P2'] }}"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "id": "YOUR_POSTGRES_CREDENTIAL_ID",
+          "name": "Aerys DB (aerys)"
+        }
+      }
+    },
+    {
+      "id": "dedup-check-01",
+      "name": "Dedup Check",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        2860,
+        -100
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "YOUR_POSTGRES_CREDENTIAL_ID",
+          "name": "Aerys DB (aerys)"
+        }
+      },
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH params AS (\n  SELECT $1::uuid AS pid, $2::text AS klabel\n)\nSELECT m.id, m.content, m.context, m.key_label, m.created_at\nFROM memories m, params p\nWHERE m.person_id = p.pid\n  AND m.key_label = p.klabel\n  AND m.deleted_at IS NULL\nUNION ALL\nSELECT NULL::uuid, NULL, NULL, NULL, NULL::timestamptz\nWHERE NOT EXISTS(\n  SELECT 1 FROM memories m2, (SELECT $1::uuid AS pid, $2::text AS klabel) p2\n  WHERE m2.person_id = p2.pid\n    AND m2.key_label = p2.klabel\n    AND m2.deleted_at IS NULL\n)\nLIMIT 1;",
+        "options": {
+          "queryReplacement": "={{ [$json.person_id, $json.key_label] }}"
+        }
+      }
+    },
+    {
+      "id": "route-dedup-result-01",
+      "name": "Route Dedup Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3060,
+        -100
+      ],
+      "parameters": {
+        "jsCode": "const dupResults = $input.all();\nconst obsItems = $('Parse Observations').all();\n\nreturn dupResults.map((dupItem, idx) => {\n  const dupResult = dupItem.json;\n  const obs = obsItems[idx]?.json || {};\n\n  // Sentinel row check (UNION ALL pattern)\n  const hasDuplicate = dupResult.id != null;\n\n  const baseFields = {\n    person_id: obs.person_id,\n    key_label: obs.key_label,\n    value_text: obs.value_text,\n    context: obs.context || null,\n    event_date: obs.event_date || null,\n    privacy_level: obs.privacy_level || 'public',\n    source_platform: obs.source_platform || 'discord',\n    new_content: obs.new_content,\n    confidence: obs.confidence !== undefined ? obs.confidence : 0.5,\n    asserted_by: obs.asserted_by || 'self'\n  };\n\n  if (hasDuplicate) {\n    const existingValue = (dupResult.content || '').split(':').slice(1).join(':').trim();\n    const existingCore = existingValue.split('--')[0].trim().toLowerCase();\n    const newValue = (obs.value_text || '').toLowerCase();\n\n    const valueChanged = existingCore !== newValue\n      && !existingCore.includes(newValue)\n      && !newValue.includes(existingCore);\n\n    return {\n      json: {\n        action: valueChanged ? 'replace' : 'update',\n        existing_id: dupResult.id,\n        ...baseFields\n      },\n      pairedItem: { item: idx }\n    };\n  } else {\n    return {\n      json: {\n        action: 'insert',\n        existing_id: null,\n        ...baseFields\n      },\n      pairedItem: { item: idx }\n    };\n  }\n});"
+      }
+    },
+    {
+      "id": "route-insert-or-update-01",
+      "name": "Route: Insert or Update",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        3260,
+        -100
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "is-insert-or-replace",
+              "leftValue": "={{ $json.action }}",
+              "rightValue": "update",
+              "operator": {
+                "type": "string",
+                "operation": "notEquals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "soft-delete-old-memory-01",
+      "name": "Soft Delete Old Memory",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        4740,
+        -300
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "YOUR_POSTGRES_CREDENTIAL_ID",
+          "name": "Aerys DB (aerys)"
+        }
+      },
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE memories SET deleted_at = NOW() WHERE id = $1::uuid AND $2 = 'replace';",
+        "options": {
+          "queryReplacement": "={{ [$json.existing_id || '00000000-0000-0000-0000-000000000000', $json.action] }}"
+        }
+      },
+      "disabled": true
+    },
+    {
+      "id": "update-memory-01",
+      "name": "Update Memory",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        3460,
+        200
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "YOUR_POSTGRES_CREDENTIAL_ID",
+          "name": "Aerys DB (aerys)"
+        }
+      },
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE memories\nSET content = $1,\n    context = $2,\n    event_date = $3,\n    updated_at = NOW()\nWHERE id = $4::uuid\n  AND deleted_at IS NULL;",
+        "options": {
+          "queryReplacement": "={{ [$json.new_content, $json.context, $json.event_date, $json.existing_id] }}"
+        }
+      }
+    },
+    {
+      "id": "batch-pre-embed-ctx",
+      "name": "Pre-Embed Context",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3380,
+        -300
+      ],
+      "parameters": {
+        "jsCode": "// Identity pass-through \u2014 preserves observation context for Prepare Insert Data\n// Items arrive from Soft Delete (replace) and direct bypass (insert)\nreturn $input.all().map((item, idx) => ({\n  json: { ...item.json },\n  pairedItem: { item: idx }\n}));"
+      }
+    }
+  ],
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Pre-check Message Source",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pre-check Message Source": {
+      "main": [
+        [
+          {
+            "node": "Route to Message Source",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route to Message Source": {
+      "main": [
+        [
+          {
+            "node": "Fetch Unprocessed Messages",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Fetch from n8n_chat_histories",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Unprocessed Messages": {
+      "main": [
+        [
+          {
+            "node": "Guard: Skip NULL person_id",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch from n8n_chat_histories": {
+      "main": [
+        [
+          {
+            "node": "Guard: Skip NULL person_id",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Has Messages": {
+      "main": [
+        [
+          {
+            "node": "Guard: Skip NULL person_id",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Done (No Messages)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Guard: Skip NULL person_id": {
+      "main": [
+        [
+          {
+            "node": "Group Messages",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Group Messages": {
+      "main": [
+        [
+          {
+            "node": "Build Extraction Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Extraction Request": {
+      "main": [
+        [
+          {
+            "node": "Call LLM for Extraction",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call LLM for Extraction": {
+      "main": [
+        [
+          {
+            "node": "Parse Observations",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Observations": {
+      "main": [
+        [
+          {
+            "node": "Guard: Skip If Empty",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Guard: Skip If Empty": {
+      "main": [
+        [
+          {
+            "node": "Insert Userinfo",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Dedup Check",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Embed Observation": {
+      "main": [
+        [
+          {
+            "node": "Guard: Skip NULL person_id (Insert)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Guard: Skip NULL person_id (Insert)": {
+      "main": [
+        [
+          {
+            "node": "Prepare Insert Data",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Insert Memory": {
+      "main": [
+        [
+          {
+            "node": "Check Messages Table Path",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Messages Table Path": {
+      "main": [
+        [],
+        []
+      ]
+    },
+    "Prepare Insert Data": {
+      "main": [
+        [
+          {
+            "node": "Insert Memory",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Dedup Check": {
+      "main": [
+        [
+          {
+            "node": "Route Dedup Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route Dedup Result": {
+      "main": [
+        [
+          {
+            "node": "Route: Insert or Update",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route: Insert or Update": {
+      "main": [
+        [
+          {
+            "node": "Pre-Embed Context",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Update Memory",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pre-Embed Context": {
+      "main": [
+        [
+          {
+            "node": "Embed Observation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  },
+  "staticData": {
+    "node:Schedule Trigger": {
+      "recurrenceRules": []
+    }
+  },
+  "id": "04-02-memory-batch-extraction"
+}

@@ -66,7 +66,7 @@ fix_adapter &
 docker events \
     --filter 'container=aerys-n8n-1' \
     --filter 'event=start' \
-    --format '{{.Status}}' | while read -r _status; do
+    --format '{{.Action}}' | while read -r _status; do
     echo "[aerys] n8n container start detected, fixing adapter..."
     fix_adapter
 done

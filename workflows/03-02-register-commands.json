@@ -1,6 +1,11 @@
 {
+  "updatedAt": "2026-02-25T21:51:47.947Z",
+  "createdAt": "2026-02-21T16:15:06.961Z",
   "id": "03-02-register-commands",
   "name": "03-02 Register Aerys Discord Commands",
+  "description": null,
+  "active": false,
+  "isArchived": false,
   "nodes": [
     {
       "parameters": {},
@@ -90,5 +95,32 @@
     "callerPolicy": "workflowsFromSameOwner",
     "availableInMCP": false
   },
-  "staticData": null
+  "staticData": null,
+  "meta": null,
+  "pinData": null,
+  "versionId": "00000000-0000-0000-0000-000000000000",
+  "activeVersionId": "00000000-0000-0000-0000-000000000000",
+  "versionCounter": 5,
+  "triggerCount": 0,
+  "shared": [
+    {
+      "updatedAt": "2026-02-21T16:15:06.961Z",
+      "createdAt": "2026-02-21T16:15:06.961Z",
+      "role": "workflow:owner",
+      "workflowId": "YOUR_REGISTER_COMMANDS_WORKFLOW_ID",
+      "projectId": "YOUR_N8N_PROJECT_ID",
+      "project": {
+        "updatedAt": "2026-01-01T00:00:00.000Z",
+        "createdAt": "2026-01-01T00:00:00.000Z",
+        "id": "YOUR_N8N_PROJECT_ID",
+        "name": "Your Project",
+        "type": "personal",
+        "icon": null,
+        "description": null,
+        "creatorId": "00000000-0000-0000-0000-000000000000"
+      }
+    }
+  ],
+  "tags": [],
+  "activeVersion": null
 }

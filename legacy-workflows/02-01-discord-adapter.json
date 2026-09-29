@@ -1,0 +1,1511 @@
+{
+  "updatedAt": "2026-01-01T00:00:00.000Z",
+  "createdAt": "2026-01-01T00:00:00.000Z",
+  "id": "02-01-discord-adapter",
+  "name": "02-01 Discord Adapter",
+  "description": null,
+  "active": true,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {
+        "type": "message",
+        "guildIds": [
+          "YOUR_DISCORD_GUILD_ID"
+        ],
+        "channelIds": [],
+        "pattern": "botMention",
+        "value": ""
+      },
+      "id": "discord-trigger-01",
+      "name": "Discord Trigger",
+      "type": "n8n-nodes-discord-trigger.discordTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ],
+      "webhookId": "00000000-0000-0000-0000-000000000000",
+      "credentials": {
+        "discordBotTriggerApi": {
+          "id": "YOUR_DISCORD_TRIGGER_CREDENTIAL_ID",
+          "name": "Aerys Discord Bot (katerlol)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Filter: Should Respond\n// Returns items that should get a response; drops the rest.\n\nconst raw = $input.item.json;\n\n// Ignore messages from bots\nif (raw.author && raw.author.bot) {\n  return [];\n}\n\n// Ignore empty messages\nif (!raw.content && (!raw.attachments || raw.attachments.length === 0)) {\n  return [];\n}\n\nconst isDM = !raw.guildId;\nconst isEdit = !!raw.editedTimestamp;\n\n// Check if bot is @mentioned in servers\n// Discord encodes mentions as <@BOT_ID> in message content\nconst botIdPattern = /<@\\d+>/;\nconst isMentioned = botIdPattern.test(raw.content || '');\n\nif (isDM) {\n  // DMs: always respond (new messages and edits)\n  return [{ json: { ...raw, _shouldRespond: true, _isDM: true, _isEdit: isEdit } }];\n}\n\n// Server messages\nif (isEdit) {\n  // Edits in servers: only respond if bot is @mentioned\n  if (isMentioned) {\n    return [{ json: { ...raw, _shouldRespond: true, _isDM: false, _isEdit: true } }];\n  }\n  // Edit without @mention: drop\n  return [];\n}\n\n// New server messages: only respond if bot is @mentioned\nif (isMentioned) {\n  return [{ json: { ...raw, _shouldRespond: true, _isDM: false, _isEdit: false } }];\n}\n\n// Server message without @mention: drop\nreturn [];"
+      },
+      "id": "filter-should-respond-01",
+      "name": "Filter: Should Respond",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        200,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Normalize Message — Discord to internal schema\n// Strips <@BOT_ID> mention syntax from message_text so AI doesn't see raw mention syntax.\n\nconst raw = $input.item.json;\n\n// Discord trigger emits flat authorId/authorName fields (not nested under author object)\nconst normalized = {\n  source_channel: \"discord\",\n  channel_id: raw.channelId || raw.channel_id || '',\n  guild_id: raw.guildId || null,\n  user_id: raw.authorId || (raw.author && raw.author.id) || 'unknown',\n  username: raw.authorName || (raw.author && (raw.author.globalName || raw.author.username)) || 'unknown',\n  message_text: (raw.content || '').replace(/<@\\d+>/g, '').trim(),\n  message_id: raw.id || raw.message_id || '',\n  is_dm: !raw.guildId,\n  conversation_privacy: raw.guildId ? 'public' : 'private',\n  is_mention: raw._isDM ? false : /<@\\d+>/.test(raw.content || ''),\n  is_edit: raw._isEdit || !!raw.editedTimestamp,\n  attachments: (raw.attachments || []).map(function(a) {\n    return {\n      type: a.contentType || 'unknown',\n      size: a.size || 0,\n      url: a.url || null,\n      filename: a.name || a.filename || 'unknown'\n    };\n  }),\n  timestamp: raw.createdTimestamp || Date.now(),\n  session_key: 'discord_' + (raw.channelId || raw.channel_id || 'unknown')\n};\n\nreturn [{ json: normalized }];\n"
+      },
+      "id": "normalize-message-01",
+      "name": "Normalize Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        400,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://discord.com/api/v10/channels/{{$json.channel_id}}/typing",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "discordBotApi",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "send-typing-01",
+      "name": "Send Typing Indicator",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        600,
+        0
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "discord-header-cred-01",
+          "name": "Discord Bot Token Header"
+        },
+        "discordBotApi": {
+          "id": "YOUR_DISCORD_BOT_CREDENTIAL_ID",
+          "name": "Discord Bot account"
+        }
+      },
+      "notes": "Authorization header: Bot YOUR_DISCORD_BOT_TOKEN — set in Discord Bot Token Header credential. Typing indicator expires after 10s; acceptable for Phase 2."
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "value": "YOUR_CORE_AGENT_WORKFLOW_ID",
+          "mode": "id"
+        },
+        "workflowInputs": {
+          "schema": [],
+          "mappingMode": "passthrough",
+          "value": {}
+        },
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "id": "execute-core-agent-01",
+      "name": "Execute Core Agent",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 2,
+      "position": [
+        3800,
+        0
+      ],
+      "notes": "Points to 02-03-core-agent workflow (created in Plan 02-02). Will error until that workflow exists and its ID is set."
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: $('Inject Context').item.json }];"
+      },
+      "id": "restore-context-01",
+      "name": "Restore Context",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1800,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "value": "YOUR_IDENTITY_RESOLVER_WORKFLOW_ID",
+          "mode": "id"
+        },
+        "workflowInputs": {
+          "schema": [
+            {
+              "name": "platform",
+              "type": "string"
+            },
+            {
+              "name": "platform_user_id",
+              "type": "string"
+            },
+            {
+              "name": "username",
+              "type": "string"
+            }
+          ],
+          "mappingMode": "defineBelow",
+          "value": {
+            "platform": "={{ $json.source_channel }}",
+            "platform_user_id": "={{ $json.user_id }}",
+            "username": "={{ $json.username }}"
+          }
+        },
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "id": "resolve-identity-disc-01",
+      "name": "Resolve Identity",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 2,
+      "position": [
+        2550,
+        0
+      ],
+      "notes": "Calls 03-01 Identity Resolver sub-workflow. Returns person_id, display_name, is_new."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Merge person_id from identity resolver back into the original message payload\n// $('Restore Context') has the normalized message with all fields\n// $input has the resolver output (person_id, display_name, is_new)\n\nconst resolverOutput = $input.item.json;\nconst originalMsg = $('Inject Location Label').item.json;\n\nreturn [{\n  json: {\n    ...originalMsg,\n    person_id: resolverOutput.person_id,\n    display_name: resolverOutput.display_name\n  }\n}];"
+      },
+      "id": "merge-person-id-disc-01",
+      "name": "Merge person_id",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2800,
+        0
+      ],
+      "notes": "Merges person_id and display_name from identity resolver into the normalized message payload."
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT COALESCE((SELECT channel_name FROM discord_channel_cache WHERE channel_id = $1), '#' || $1) AS channel_name",
+        "options": {
+          "queryReplacement": "={{ [$json.channel_id] }}"
+        }
+      },
+      "id": "lookup-channel-name-disc-01",
+      "name": "Lookup Channel Name",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        2050,
+        0
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "YOUR_POSTGRES_CREDENTIAL_ID",
+          "name": "Aerys DB (aerys)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const channelName = $input.item.json.channel_name || 'unknown';\nconst ctx = $('Restore Context').item.json;\nreturn [{\n  json: {\n    ...ctx,\n    channel_name: channelName,\n    location_label: 'Discord — The Resonant Span / ' + channelName\n  }\n}];"
+      },
+      "id": "inject-location-label-disc-01",
+      "name": "Inject Location Label",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2300,
+        0
+      ]
+    },
+    {
+      "id": "node-get-channel-msgs",
+      "name": "Get Channel Messages",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        800,
+        -200
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "=https://discord.com/api/v10/channels/{{ $('Normalize Message').item.json.channel_id }}/messages?limit=30",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bot YOUR_DISCORD_BOT_TOKEN"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "node-get-server-members",
+      "name": "Get Server Members",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        800,
+        200
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "https://discord.com/api/v10/guilds/YOUR_DISCORD_GUILD_ID/members?limit=100",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bot YOUR_DISCORD_BOT_TOKEN"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "node-build-thread-context",
+      "name": "Build Thread Context",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1050,
+        -200
+      ],
+      "parameters": {
+        "jsCode": "// Snowflake to Date helper\nfunction snowflakeToDate(id) {\n  try { return new Date(Number((BigInt(id) >> 22n)) + 1420070400000); }\n  catch { return null; }\n}\n\nconst items = $input.all();\n// HTTP Request returns the messages array directly as one item with json being the array\n// or as multiple items (one per message) - handle both cases\nlet msgs = [];\nif (items.length === 1 && Array.isArray(items[0].json)) {\n  msgs = items[0].json;\n} else {\n  msgs = items.map(i => i.json);\n}\n\n// Get the triggering message context from Normalize Message node\nconst trigMsg = $('Normalize Message').item.json;\nconst trigId = trigMsg.message_id || trigMsg.id;\nconst triggerTime = trigMsg.timestamp ? new Date(trigMsg.timestamp) : new Date();\n\nfunction nameOf(m) {\n  return m.author?.global_name || m.author?.username || m.username || 'Unknown';\n}\nfunction msgDate(m) {\n  if (m.timestamp) return new Date(m.timestamp);\n  if (m.id) return snowflakeToDate(m.id);\n  return null;\n}\n\n// Filter: all messages (humans AND bots), before trigger time, not the triggering message.\nconst roomMsgs = msgs.filter(m => {\n  const hasText = (m.content ?? '').trim().length > 0;\n  const mt = msgDate(m);\n  const beforeTrigger = mt ? (mt <= triggerTime) : true;\n  const notWake = m.id !== trigId;\n  return hasText && beforeTrigger && notWake;\n});\n\n// Participant summary header\nconst speakerCounts = {};\nroomMsgs.forEach(m => {\n  const name = nameOf(m);\n  speakerCounts[name] = (speakerCounts[name] || 0) + 1;\n});\nconst participantSummary = Object.keys(speakerCounts).length > 0\n  ? `PARTICIPANTS: ${Object.entries(speakerCounts).sort((a,b)=>b[1]-a[1]).map(([n,c])=>`${n} (${c})`).join(', ')}\\n---\\n`\n  : '';\n\n// Speaker-tagged transcript (capped at 5800 chars)\nfunction formatTime(date) {\n  if (!date) return '';\n  return date.toLocaleString('en-US', {\n    timeZone: 'America/New_York',\n    month: 'short', day: 'numeric',\n    hour: 'numeric', minute: '2-digit',\n    hour12: true, timeZoneName: 'short'\n  }); // -> \"Feb 26, 2:34 PM EST\"\n}\nconst lines = roomMsgs.map(m => {\n  const t = msgDate(m);\n  const timeStr = t ? ` (${formatTime(t)})` : '';\n  return `[${nameOf(m)}${timeStr}]: ${m.content.trim()}`;\n});\nconst transcript = (participantSummary + lines.join('\\n')).slice(0, 5800);\n\nreturn [{ json: { thread_context: transcript || '' } }];"
+      }
+    },
+    {
+      "id": "node-format-member-list",
+      "name": "Format Member List",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1050,
+        200
+      ],
+      "parameters": {
+        "jsCode": "const items = $input.all();\n// HTTP Request returns members array - handle both array and multiple items\nlet members = [];\nif (items.length === 1 && Array.isArray(items[0].json)) {\n  members = items[0].json;\n} else {\n  members = items.map(i => i.json);\n}\nconst memberMap = {};\nmembers.forEach(m => {\n  const userId = m.user?.id || m.id;\n  const displayName = m.nick || m.user?.global_name || m.user?.username || 'Unknown';\n  if (userId) memberMap[userId] = displayName;\n});\nconst memberListText = Object.entries(memberMap)\n  .map(([id, name]) => `<@${id}>: ${name}`)\n  .join('\\n');\nreturn [{ json: { member_list: memberListText, member_map: memberMap } }];"
+      }
+    },
+    {
+      "id": "node-inject-context",
+      "name": "Inject Context",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1550,
+        0
+      ],
+      "parameters": {
+        "jsCode": "// Both Build Thread Context and Format Member List arrive as items on input 0\n// Merge Context (append mode) concatenates them — find each by its fields\nconst items = $input.all();\nconst threadCtx = items.find(i => i.json.thread_context !== undefined)?.json || {};\nconst memberCtx = items.find(i => i.json.member_list !== undefined)?.json || {};\nconst original = $('Normalize Message').item.json;\nreturn [{\n  json: {\n    ...original,\n    thread_context: threadCtx.thread_context || '',\n    member_list: memberCtx.member_list || '',\n    member_map: memberCtx.member_map || {}\n  }\n}];"
+      }
+    },
+    {
+      "id": "node-merge-context",
+      "name": "Merge Context",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [
+        1300,
+        0
+      ],
+      "parameters": {
+        "mode": "append",
+        "options": {}
+      }
+    },
+    {
+      "id": "disc-prep-mem-fetch-01",
+      "name": "Prepare Memory Fetch",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3050,
+        0
+      ],
+      "parameters": {
+        "jsCode": "const input = $input.first().json;\nreturn [{\n  json: {\n    person_id: input.person_id,\n    channel_id: input.channel_id || input.session_key,\n    message_text: input.message_content || input.message_text || input.content || '',\n    privacy_context: input.conversation_privacy || (input.is_dm ? 'private' : 'public')\n  }\n}];"
+      }
+    },
+    {
+      "id": "disc-exec-mem-ret-01",
+      "name": "Execute Memory Retrieval",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 2,
+      "position": [
+        3300,
+        0
+      ],
+      "parameters": {
+        "workflowId": {
+          "value": "YOUR_MEMORY_RETRIEVAL_WORKFLOW_ID",
+          "mode": "id"
+        },
+        "workflowInputs": {
+          "schema": [
+            {
+              "name": "person_id",
+              "type": "string"
+            },
+            {
+              "name": "channel_id",
+              "type": "string"
+            },
+            {
+              "name": "message_text",
+              "type": "string"
+            },
+            {
+              "name": "privacy_context",
+              "type": "string"
+            }
+          ],
+          "mappingMode": "defineBelow",
+          "value": {
+            "person_id": "={{ $json.person_id }}",
+            "channel_id": "={{ $json.channel_id }}",
+            "message_text": "={{ $json.message_text }}",
+            "privacy_context": "={{ $json.privacy_context }}"
+          }
+        },
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      }
+    },
+    {
+      "id": "disc-merge-mem-01",
+      "name": "Merge Memory Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3550,
+        0
+      ],
+      "parameters": {
+        "jsCode": "const memResult = $input.first().json;\nconst original = $('Build Thread Context (Guild)').item.json;\nreturn [{\n  json: {\n    ...original,\n    memory_context: memResult.memory_context || ''\n  }\n}];"
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:5678/webhook/aerys-profile-api",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ person_id: $json.person_id, privacy_context: $json.conversation_privacy || 'public' }) }}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "disc-call-profile-api",
+      "name": "Call Profile API",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3750,
+        0
+      ],
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const profileResp = $input.first().json;\nconst original = $('Merge Memory Result').item.json;\nconst profileData = profileResp.profile || {};\nconst lines = profileData.lines || [];\nconst coldStart = profileData.cold_start || false;\n\nconst profileContext = lines.length > 0\n  ? lines.join('\\n')\n  : '';\n\nreturn [{\n  json: {\n    ...original,\n    profile_context: profileContext,\n    cold_start: coldStart\n  }\n}];"
+      },
+      "id": "disc-inject-profile-ctx",
+      "name": "Inject Profile Context",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3950,
+        0
+      ]
+    },
+    {
+      "id": "disc-fetch-chat-history-01",
+      "name": "Fetch Chat History (Guild)",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        2870,
+        200
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH params AS (SELECT $1::text AS sid)\nSELECT role, content, created_at FROM (\n  SELECT \n    h.message->>'type' AS role,\n    h.message->>'content' AS content,\n    h.created_at\n  FROM n8n_chat_histories h\n  JOIN params ON h.session_id = params.sid\n  WHERE h.created_at > NOW() - INTERVAL '7 days'\n  ORDER BY h.created_at DESC\n  LIMIT 20\n) limited\nUNION ALL\nSELECT 'sentinel'::text, NULL::text, NULL::timestamptz\nWHERE NOT EXISTS (\n  SELECT 1 FROM n8n_chat_histories h\n  JOIN params ON h.session_id = params.sid\n  WHERE h.created_at > NOW() - INTERVAL '7 days'\n)",
+        "options": {
+          "queryReplacement": "={{ [$json.session_key] }}"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "id": "YOUR_POSTGRES_CREDENTIAL_ID",
+          "name": "Aerys DB (aerys)"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "id": "disc-build-thread-ctx-01",
+      "name": "Build Thread Context (Guild)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3070,
+        200
+      ],
+      "parameters": {
+        "jsCode": "// Build timestamped thread context from n8n_chat_histories\n// Receives N items (one per DB row); outputs 1 item with thread_context injected\n\nconst rows = $input.all();\nconst upstream = $('Merge person_id').item.json;\n\n// Filter out sentinel, nulls, and any error rows\nconst validRows = rows.filter(r =>\n  r.json.role !== 'sentinel' &&\n  r.json.content !== null &&\n  r.json.content !== undefined &&\n  !r.json.error\n);\n\nlet thread_context = null;\n\nif (validRows.length > 0) {\n  // Sort chronologically (query returned DESC)\n  const sorted = validRows.sort((a, b) =>\n    new Date(a.json.created_at) - new Date(b.json.created_at)\n  );\n\n  const displayName = upstream.display_name || upstream.username || 'User';\n\n  const lines = sorted.map(r => {\n    const ts = new Date(r.json.created_at);\n    const formatted = ts.toLocaleString('en-US', {\n      timeZone: 'America/New_York',\n      month: 'short', day: 'numeric',\n      hour: 'numeric', minute: '2-digit',\n      hour12: true, timeZoneName: 'short'\n    });\n    const speaker = r.json.role === 'human' ? displayName : 'Aerys';\n    const content = (r.json.content || '').trim();\n    const snippet = content.length > 300 ? content.substring(0, 300) + '...' : content;\n    return `[${formatted}] ${speaker}: ${snippet}`;\n  });\n\n  thread_context = lines.join('\\n');\n}\n\nreturn [{\n  json: {\n    ...upstream,\n    thread_context: thread_context || upstream.thread_context || null\n  }\n}];"
+      }
+    }
+  ],
+  "connections": {
+    "Discord Trigger": {
+      "main": [
+        [
+          {
+            "node": "Filter: Should Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter: Should Respond": {
+      "main": [
+        [
+          {
+            "node": "Normalize Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Message": {
+      "main": [
+        [
+          {
+            "node": "Send Typing Indicator",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Typing Indicator": {
+      "main": [
+        [
+          {
+            "node": "Get Channel Messages",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Get Server Members",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute Core Agent": {
+      "main": [
+        []
+      ]
+    },
+    "Restore Context": {
+      "main": [
+        [
+          {
+            "node": "Lookup Channel Name",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Resolve Identity": {
+      "main": [
+        [
+          {
+            "node": "Merge person_id",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Lookup Channel Name": {
+      "main": [
+        [
+          {
+            "node": "Inject Location Label",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Inject Location Label": {
+      "main": [
+        [
+          {
+            "node": "Resolve Identity",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Channel Messages": {
+      "main": [
+        [
+          {
+            "node": "Build Thread Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Server Members": {
+      "main": [
+        [
+          {
+            "node": "Format Member List",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Thread Context": {
+      "main": [
+        [
+          {
+            "node": "Merge Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Member List": {
+      "main": [
+        [
+          {
+            "node": "Merge Context",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Inject Context": {
+      "main": [
+        [
+          {
+            "node": "Restore Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge Context": {
+      "main": [
+        [
+          {
+            "node": "Inject Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Memory Fetch": {
+      "main": [
+        [
+          {
+            "node": "Execute Memory Retrieval",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute Memory Retrieval": {
+      "main": [
+        [
+          {
+            "node": "Merge Memory Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge Memory Result": {
+      "main": [
+        [
+          {
+            "node": "Call Profile API",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call Profile API": {
+      "main": [
+        [
+          {
+            "node": "Inject Profile Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Inject Profile Context": {
+      "main": [
+        [
+          {
+            "node": "Execute Core Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge person_id": {
+      "main": [
+        [
+          {
+            "node": "Fetch Chat History (Guild)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Chat History (Guild)": {
+      "main": [
+        [
+          {
+            "node": "Build Thread Context (Guild)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Thread Context (Guild)": {
+      "main": [
+        [
+          {
+            "node": "Prepare Memory Fetch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  },
+  "staticData": null,
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "pinData": {},
+  "versionId": "00000000-0000-0000-0000-000000000000",
+  "activeVersionId": "00000000-0000-0000-0000-000000000000",
+  "versionCounter": 392,
+  "triggerCount": 1,
+  "shared": [
+    {
+      "updatedAt": "2026-02-18T14:15:02.898Z",
+      "createdAt": "2026-02-18T14:15:02.898Z",
+      "role": "workflow:owner",
+      "workflowId": "YOUR_DISCORD_ADAPTER_WORKFLOW_ID",
+      "projectId": "YOUR_N8N_PROJECT_ID",
+      "project": {
+        "updatedAt": "2026-01-01T00:00:00.000Z",
+        "createdAt": "2026-01-01T00:00:00.000Z",
+        "id": "YOUR_N8N_PROJECT_ID",
+        "name": "Your Project",
+        "type": "personal",
+        "icon": null,
+        "description": null,
+        "creatorId": "00000000-0000-0000-0000-000000000000"
+      }
+    }
+  ],
+  "tags": [],
+  "activeVersion": {
+    "updatedAt": "2026-03-10T23:21:35.394Z",
+    "createdAt": "2026-03-10T23:21:35.394Z",
+    "versionId": "00000000-0000-0000-0000-000000000000",
+    "workflowId": "YOUR_DISCORD_ADAPTER_WORKFLOW_ID",
+    "nodes": [
+      {
+        "parameters": {
+          "type": "message",
+          "guildIds": [
+            "YOUR_DISCORD_GUILD_ID"
+          ],
+          "channelIds": [],
+          "pattern": "botMention",
+          "value": ""
+        },
+        "id": "discord-trigger-01",
+        "name": "Discord Trigger",
+        "type": "n8n-nodes-discord-trigger.discordTrigger",
+        "typeVersion": 1,
+        "position": [
+          0,
+          0
+        ],
+        "webhookId": "00000000-0000-0000-0000-000000000000",
+        "credentials": {
+          "discordBotTriggerApi": {
+            "id": "YOUR_DISCORD_TRIGGER_CREDENTIAL_ID",
+            "name": "Aerys Discord Bot (katerlol)"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "jsCode": "// Filter: Should Respond\n// Returns items that should get a response; drops the rest.\n\nconst raw = $input.item.json;\n\n// Ignore messages from bots\nif (raw.author && raw.author.bot) {\n  return [];\n}\n\n// Ignore empty messages\nif (!raw.content && (!raw.attachments || raw.attachments.length === 0)) {\n  return [];\n}\n\nconst isDM = !raw.guildId;\nconst isEdit = !!raw.editedTimestamp;\n\n// Check if bot is @mentioned in servers\n// Discord encodes mentions as <@BOT_ID> in message content\nconst botIdPattern = /<@\\d+>/;\nconst isMentioned = botIdPattern.test(raw.content || '');\n\nif (isDM) {\n  // DMs: always respond (new messages and edits)\n  return [{ json: { ...raw, _shouldRespond: true, _isDM: true, _isEdit: isEdit } }];\n}\n\n// Server messages\nif (isEdit) {\n  // Edits in servers: only respond if bot is @mentioned\n  if (isMentioned) {\n    return [{ json: { ...raw, _shouldRespond: true, _isDM: false, _isEdit: true } }];\n  }\n  // Edit without @mention: drop\n  return [];\n}\n\n// New server messages: only respond if bot is @mentioned\nif (isMentioned) {\n  return [{ json: { ...raw, _shouldRespond: true, _isDM: false, _isEdit: false } }];\n}\n\n// Server message without @mention: drop\nreturn [];"
+        },
+        "id": "filter-should-respond-01",
+        "name": "Filter: Should Respond",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          200,
+          0
+        ]
+      },
+      {
+        "parameters": {
+          "jsCode": "// Normalize Message — Discord to internal schema\n// Strips <@BOT_ID> mention syntax from message_text so AI doesn't see raw mention syntax.\n\nconst raw = $input.item.json;\n\n// Discord trigger emits flat authorId/authorName fields (not nested under author object)\nconst normalized = {\n  source_channel: \"discord\",\n  channel_id: raw.channelId || raw.channel_id || '',\n  guild_id: raw.guildId || null,\n  user_id: raw.authorId || (raw.author && raw.author.id) || 'unknown',\n  username: raw.authorName || (raw.author && (raw.author.globalName || raw.author.username)) || 'unknown',\n  message_text: (raw.content || '').replace(/<@\\d+>/g, '').trim(),\n  message_id: raw.id || raw.message_id || '',\n  is_dm: !raw.guildId,\n  conversation_privacy: raw.guildId ? 'public' : 'private',\n  is_mention: raw._isDM ? false : /<@\\d+>/.test(raw.content || ''),\n  is_edit: raw._isEdit || !!raw.editedTimestamp,\n  attachments: (raw.attachments || []).map(function(a) {\n    return {\n      type: a.contentType || 'unknown',\n      size: a.size || 0,\n      url: a.url || null,\n      filename: a.name || a.filename || 'unknown'\n    };\n  }),\n  timestamp: raw.createdTimestamp || Date.now(),\n  session_key: 'discord_' + (raw.channelId || raw.channel_id || 'unknown')\n};\n\nreturn [{ json: normalized }];\n"
+        },
+        "id": "normalize-message-01",
+        "name": "Normalize Message",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          400,
+          0
+        ]
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "=https://discord.com/api/v10/channels/{{$json.channel_id}}/typing",
+          "authentication": "predefinedCredentialType",
+          "nodeCredentialType": "discordBotApi",
+          "options": {
+            "response": {
+              "response": {
+                "neverError": true
+              }
+            }
+          }
+        },
+        "id": "send-typing-01",
+        "name": "Send Typing Indicator",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          600,
+          0
+        ],
+        "credentials": {
+          "httpHeaderAuth": {
+            "id": "discord-header-cred-01",
+            "name": "Discord Bot Token Header"
+          },
+          "discordBotApi": {
+            "id": "YOUR_DISCORD_BOT_CREDENTIAL_ID",
+            "name": "Discord Bot account"
+          }
+        },
+        "notes": "Authorization header: Bot YOUR_DISCORD_BOT_TOKEN — set in Discord Bot Token Header credential. Typing indicator expires after 10s; acceptable for Phase 2."
+      },
+      {
+        "parameters": {
+          "workflowId": {
+            "value": "YOUR_CORE_AGENT_WORKFLOW_ID",
+            "mode": "id"
+          },
+          "workflowInputs": {
+            "schema": [],
+            "mappingMode": "passthrough",
+            "value": {}
+          },
+          "options": {
+            "waitForSubWorkflow": true
+          }
+        },
+        "id": "execute-core-agent-01",
+        "name": "Execute Core Agent",
+        "type": "n8n-nodes-base.executeWorkflow",
+        "typeVersion": 2,
+        "position": [
+          3800,
+          0
+        ],
+        "notes": "Points to 02-03-core-agent workflow (created in Plan 02-02). Will error until that workflow exists and its ID is set."
+      },
+      {
+        "parameters": {
+          "jsCode": "return [{ json: $('Inject Context').item.json }];"
+        },
+        "id": "restore-context-01",
+        "name": "Restore Context",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1800,
+          0
+        ]
+      },
+      {
+        "parameters": {
+          "workflowId": {
+            "value": "YOUR_IDENTITY_RESOLVER_WORKFLOW_ID",
+            "mode": "id"
+          },
+          "workflowInputs": {
+            "schema": [
+              {
+                "name": "platform",
+                "type": "string"
+              },
+              {
+                "name": "platform_user_id",
+                "type": "string"
+              },
+              {
+                "name": "username",
+                "type": "string"
+              }
+            ],
+            "mappingMode": "defineBelow",
+            "value": {
+              "platform": "={{ $json.source_channel }}",
+              "platform_user_id": "={{ $json.user_id }}",
+              "username": "={{ $json.username }}"
+            }
+          },
+          "options": {
+            "waitForSubWorkflow": true
+          }
+        },
+        "id": "resolve-identity-disc-01",
+        "name": "Resolve Identity",
+        "type": "n8n-nodes-base.executeWorkflow",
+        "typeVersion": 2,
+        "position": [
+          2550,
+          0
+        ],
+        "notes": "Calls 03-01 Identity Resolver sub-workflow. Returns person_id, display_name, is_new."
+      },
+      {
+        "parameters": {
+          "jsCode": "// Merge person_id from identity resolver back into the original message payload\n// $('Restore Context') has the normalized message with all fields\n// $input has the resolver output (person_id, display_name, is_new)\n\nconst resolverOutput = $input.item.json;\nconst originalMsg = $('Inject Location Label').item.json;\n\nreturn [{\n  json: {\n    ...originalMsg,\n    person_id: resolverOutput.person_id,\n    display_name: resolverOutput.display_name\n  }\n}];"
+        },
+        "id": "merge-person-id-disc-01",
+        "name": "Merge person_id",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          2800,
+          0
+        ],
+        "notes": "Merges person_id and display_name from identity resolver into the normalized message payload."
+      },
+      {
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "SELECT COALESCE((SELECT channel_name FROM discord_channel_cache WHERE channel_id = $1), '#' || $1) AS channel_name",
+          "options": {
+            "queryReplacement": "={{ [$json.channel_id] }}"
+          }
+        },
+        "id": "lookup-channel-name-disc-01",
+        "name": "Lookup Channel Name",
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.5,
+        "position": [
+          2050,
+          0
+        ],
+        "credentials": {
+          "postgres": {
+            "id": "YOUR_POSTGRES_CREDENTIAL_ID",
+            "name": "Aerys DB (aerys)"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "jsCode": "const channelName = $input.item.json.channel_name || 'unknown';\nconst ctx = $('Restore Context').item.json;\nreturn [{\n  json: {\n    ...ctx,\n    channel_name: channelName,\n    location_label: 'Discord — The Resonant Span / ' + channelName\n  }\n}];"
+        },
+        "id": "inject-location-label-disc-01",
+        "name": "Inject Location Label",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          2300,
+          0
+        ]
+      },
+      {
+        "id": "node-get-channel-msgs",
+        "name": "Get Channel Messages",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          800,
+          -200
+        ],
+        "parameters": {
+          "method": "GET",
+          "url": "=https://discord.com/api/v10/channels/{{ $('Normalize Message').item.json.channel_id }}/messages?limit=30",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Authorization",
+                "value": "Bot YOUR_DISCORD_BOT_TOKEN"
+              }
+            ]
+          },
+          "options": {}
+        }
+      },
+      {
+        "id": "node-get-server-members",
+        "name": "Get Server Members",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          800,
+          200
+        ],
+        "parameters": {
+          "method": "GET",
+          "url": "https://discord.com/api/v10/guilds/YOUR_DISCORD_GUILD_ID/members?limit=100",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Authorization",
+                "value": "Bot YOUR_DISCORD_BOT_TOKEN"
+              }
+            ]
+          },
+          "options": {}
+        }
+      },
+      {
+        "id": "node-build-thread-context",
+        "name": "Build Thread Context",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1050,
+          -200
+        ],
+        "parameters": {
+          "jsCode": "// Snowflake to Date helper\nfunction snowflakeToDate(id) {\n  try { return new Date(Number((BigInt(id) >> 22n)) + 1420070400000); }\n  catch { return null; }\n}\n\nconst items = $input.all();\n// HTTP Request returns the messages array directly as one item with json being the array\n// or as multiple items (one per message) - handle both cases\nlet msgs = [];\nif (items.length === 1 && Array.isArray(items[0].json)) {\n  msgs = items[0].json;\n} else {\n  msgs = items.map(i => i.json);\n}\n\n// Get the triggering message context from Normalize Message node\nconst trigMsg = $('Normalize Message').item.json;\nconst trigId = trigMsg.message_id || trigMsg.id;\nconst triggerTime = trigMsg.timestamp ? new Date(trigMsg.timestamp) : new Date();\n\nfunction nameOf(m) {\n  return m.author?.global_name || m.author?.username || m.username || 'Unknown';\n}\nfunction msgDate(m) {\n  if (m.timestamp) return new Date(m.timestamp);\n  if (m.id) return snowflakeToDate(m.id);\n  return null;\n}\n\n// Filter: all messages (humans AND bots), before trigger time, not the triggering message.\nconst roomMsgs = msgs.filter(m => {\n  const hasText = (m.content ?? '').trim().length > 0;\n  const mt = msgDate(m);\n  const beforeTrigger = mt ? (mt <= triggerTime) : true;\n  const notWake = m.id !== trigId;\n  return hasText && beforeTrigger && notWake;\n});\n\n// Participant summary header\nconst speakerCounts = {};\nroomMsgs.forEach(m => {\n  const name = nameOf(m);\n  speakerCounts[name] = (speakerCounts[name] || 0) + 1;\n});\nconst participantSummary = Object.keys(speakerCounts).length > 0\n  ? `PARTICIPANTS: ${Object.entries(speakerCounts).sort((a,b)=>b[1]-a[1]).map(([n,c])=>`${n} (${c})`).join(', ')}\\n---\\n`\n  : '';\n\n// Speaker-tagged transcript (capped at 5800 chars)\nfunction formatTime(date) {\n  if (!date) return '';\n  return date.toLocaleString('en-US', {\n    timeZone: 'America/New_York',\n    month: 'short', day: 'numeric',\n    hour: 'numeric', minute: '2-digit',\n    hour12: true, timeZoneName: 'short'\n  }); // -> \"Feb 26, 2:34 PM EST\"\n}\nconst lines = roomMsgs.map(m => {\n  const t = msgDate(m);\n  const timeStr = t ? ` (${formatTime(t)})` : '';\n  return `[${nameOf(m)}${timeStr}]: ${m.content.trim()}`;\n});\nconst transcript = (participantSummary + lines.join('\\n')).slice(0, 5800);\n\nreturn [{ json: { thread_context: transcript || '' } }];"
+        }
+      },
+      {
+        "id": "node-format-member-list",
+        "name": "Format Member List",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1050,
+          200
+        ],
+        "parameters": {
+          "jsCode": "const items = $input.all();\n// HTTP Request returns members array - handle both array and multiple items\nlet members = [];\nif (items.length === 1 && Array.isArray(items[0].json)) {\n  members = items[0].json;\n} else {\n  members = items.map(i => i.json);\n}\nconst memberMap = {};\nmembers.forEach(m => {\n  const userId = m.user?.id || m.id;\n  const displayName = m.nick || m.user?.global_name || m.user?.username || 'Unknown';\n  if (userId) memberMap[userId] = displayName;\n});\nconst memberListText = Object.entries(memberMap)\n  .map(([id, name]) => `<@${id}>: ${name}`)\n  .join('\\n');\nreturn [{ json: { member_list: memberListText, member_map: memberMap } }];"
+        }
+      },
+      {
+        "id": "node-inject-context",
+        "name": "Inject Context",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1550,
+          0
+        ],
+        "parameters": {
+          "jsCode": "// Both Build Thread Context and Format Member List arrive as items on input 0\n// Merge Context (append mode) concatenates them — find each by its fields\nconst items = $input.all();\nconst threadCtx = items.find(i => i.json.thread_context !== undefined)?.json || {};\nconst memberCtx = items.find(i => i.json.member_list !== undefined)?.json || {};\nconst original = $('Normalize Message').item.json;\nreturn [{\n  json: {\n    ...original,\n    thread_context: threadCtx.thread_context || '',\n    member_list: memberCtx.member_list || '',\n    member_map: memberCtx.member_map || {}\n  }\n}];"
+        }
+      },
+      {
+        "id": "node-merge-context",
+        "name": "Merge Context",
+        "type": "n8n-nodes-base.merge",
+        "typeVersion": 3,
+        "position": [
+          1300,
+          0
+        ],
+        "parameters": {
+          "mode": "append",
+          "options": {}
+        }
+      },
+      {
+        "id": "disc-prep-mem-fetch-01",
+        "name": "Prepare Memory Fetch",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          3050,
+          0
+        ],
+        "parameters": {
+          "jsCode": "const input = $input.first().json;\nreturn [{\n  json: {\n    person_id: input.person_id,\n    channel_id: input.channel_id || input.session_key,\n    message_text: input.message_content || input.message_text || input.content || '',\n    privacy_context: input.conversation_privacy || (input.is_dm ? 'private' : 'public')\n  }\n}];"
+        }
+      },
+      {
+        "id": "disc-exec-mem-ret-01",
+        "name": "Execute Memory Retrieval",
+        "type": "n8n-nodes-base.executeWorkflow",
+        "typeVersion": 2,
+        "position": [
+          3300,
+          0
+        ],
+        "parameters": {
+          "workflowId": {
+            "value": "YOUR_MEMORY_RETRIEVAL_WORKFLOW_ID",
+            "mode": "id"
+          },
+          "workflowInputs": {
+            "schema": [
+              {
+                "name": "person_id",
+                "type": "string"
+              },
+              {
+                "name": "channel_id",
+                "type": "string"
+              },
+              {
+                "name": "message_text",
+                "type": "string"
+              },
+              {
+                "name": "privacy_context",
+                "type": "string"
+              }
+            ],
+            "mappingMode": "defineBelow",
+            "value": {
+              "person_id": "={{ $json.person_id }}",
+              "channel_id": "={{ $json.channel_id }}",
+              "message_text": "={{ $json.message_text }}",
+              "privacy_context": "={{ $json.privacy_context }}"
+            }
+          },
+          "options": {
+            "waitForSubWorkflow": true
+          }
+        }
+      },
+      {
+        "id": "disc-merge-mem-01",
+        "name": "Merge Memory Result",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          3550,
+          0
+        ],
+        "parameters": {
+          "jsCode": "const memResult = $input.first().json;\nconst original = $('Build Thread Context (Guild)').item.json;\nreturn [{\n  json: {\n    ...original,\n    memory_context: memResult.memory_context || ''\n  }\n}];"
+        }
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "http://localhost:5678/webhook/aerys-profile-api",
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={{ JSON.stringify({ person_id: $json.person_id, privacy_context: $json.conversation_privacy || 'public' }) }}",
+          "options": {
+            "response": {
+              "response": {
+                "neverError": true
+              }
+            }
+          }
+        },
+        "id": "disc-call-profile-api",
+        "name": "Call Profile API",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          3750,
+          0
+        ],
+        "alwaysOutputData": true
+      },
+      {
+        "parameters": {
+          "jsCode": "const profileResp = $input.first().json;\nconst original = $('Merge Memory Result').item.json;\nconst profileData = profileResp.profile || {};\nconst lines = profileData.lines || [];\nconst coldStart = profileData.cold_start || false;\n\nconst profileContext = lines.length > 0\n  ? lines.join('\\n')\n  : '';\n\nreturn [{\n  json: {\n    ...original,\n    profile_context: profileContext,\n    cold_start: coldStart\n  }\n}];"
+        },
+        "id": "disc-inject-profile-ctx",
+        "name": "Inject Profile Context",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          3950,
+          0
+        ]
+      },
+      {
+        "id": "disc-fetch-chat-history-01",
+        "name": "Fetch Chat History (Guild)",
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.5,
+        "position": [
+          2870,
+          200
+        ],
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "WITH params AS (SELECT $1::text AS sid)\nSELECT role, content, created_at FROM (\n  SELECT \n    h.message->>'type' AS role,\n    h.message->>'content' AS content,\n    h.created_at\n  FROM n8n_chat_histories h\n  JOIN params ON h.session_id = params.sid\n  WHERE h.created_at > NOW() - INTERVAL '7 days'\n  ORDER BY h.created_at DESC\n  LIMIT 20\n) limited\nUNION ALL\nSELECT 'sentinel'::text, NULL::text, NULL::timestamptz\nWHERE NOT EXISTS (\n  SELECT 1 FROM n8n_chat_histories h\n  JOIN params ON h.session_id = params.sid\n  WHERE h.created_at > NOW() - INTERVAL '7 days'\n)",
+          "options": {
+            "queryReplacement": "={{ [$json.session_key] }}"
+          }
+        },
+        "credentials": {
+          "postgres": {
+            "id": "YOUR_POSTGRES_CREDENTIAL_ID",
+            "name": "Aerys DB (aerys)"
+          }
+        },
+        "continueOnFail": true
+      },
+      {
+        "id": "disc-build-thread-ctx-01",
+        "name": "Build Thread Context (Guild)",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          3070,
+          200
+        ],
+        "parameters": {
+          "jsCode": "// Build timestamped thread context from n8n_chat_histories\n// Receives N items (one per DB row); outputs 1 item with thread_context injected\n\nconst rows = $input.all();\nconst upstream = $('Merge person_id').item.json;\n\n// Filter out sentinel, nulls, and any error rows\nconst validRows = rows.filter(r =>\n  r.json.role !== 'sentinel' &&\n  r.json.content !== null &&\n  r.json.content !== undefined &&\n  !r.json.error\n);\n\nlet thread_context = null;\n\nif (validRows.length > 0) {\n  // Sort chronologically (query returned DESC)\n  const sorted = validRows.sort((a, b) =>\n    new Date(a.json.created_at) - new Date(b.json.created_at)\n  );\n\n  const displayName = upstream.display_name || upstream.username || 'User';\n\n  const lines = sorted.map(r => {\n    const ts = new Date(r.json.created_at);\n    const formatted = ts.toLocaleString('en-US', {\n      timeZone: 'America/New_York',\n      month: 'short', day: 'numeric',\n      hour: 'numeric', minute: '2-digit',\n      hour12: true, timeZoneName: 'short'\n    });\n    const speaker = r.json.role === 'human' ? displayName : 'Aerys';\n    const content = (r.json.content || '').trim();\n    const snippet = content.length > 300 ? content.substring(0, 300) + '...' : content;\n    return `[${formatted}] ${speaker}: ${snippet}`;\n  });\n\n  thread_context = lines.join('\\n');\n}\n\nreturn [{\n  json: {\n    ...upstream,\n    thread_context: thread_context || upstream.thread_context || null\n  }\n}];"
+        }
+      }
+    ],
+    "connections": {
+      "Discord Trigger": {
+        "main": [
+          [
+            {
+              "node": "Filter: Should Respond",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Filter: Should Respond": {
+        "main": [
+          [
+            {
+              "node": "Normalize Message",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Normalize Message": {
+        "main": [
+          [
+            {
+              "node": "Send Typing Indicator",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Send Typing Indicator": {
+        "main": [
+          [
+            {
+              "node": "Get Channel Messages",
+              "type": "main",
+              "index": 0
+            },
+            {
+              "node": "Get Server Members",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Execute Core Agent": {
+        "main": [
+          []
+        ]
+      },
+      "Restore Context": {
+        "main": [
+          [
+            {
+              "node": "Lookup Channel Name",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Resolve Identity": {
+        "main": [
+          [
+            {
+              "node": "Merge person_id",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Lookup Channel Name": {
+        "main": [
+          [
+            {
+              "node": "Inject Location Label",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Inject Location Label": {
+        "main": [
+          [
+            {
+              "node": "Resolve Identity",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Get Channel Messages": {
+        "main": [
+          [
+            {
+              "node": "Build Thread Context",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Get Server Members": {
+        "main": [
+          [
+            {
+              "node": "Format Member List",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Build Thread Context": {
+        "main": [
+          [
+            {
+              "node": "Merge Context",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Format Member List": {
+        "main": [
+          [
+            {
+              "node": "Merge Context",
+              "type": "main",
+              "index": 1
+            }
+          ]
+        ]
+      },
+      "Inject Context": {
+        "main": [
+          [
+            {
+              "node": "Restore Context",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Merge Context": {
+        "main": [
+          [
+            {
+              "node": "Inject Context",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Prepare Memory Fetch": {
+        "main": [
+          [
+            {
+              "node": "Execute Memory Retrieval",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Execute Memory Retrieval": {
+        "main": [
+          [
+            {
+              "node": "Merge Memory Result",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Merge Memory Result": {
+        "main": [
+          [
+            {
+              "node": "Call Profile API",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Call Profile API": {
+        "main": [
+          [
+            {
+              "node": "Inject Profile Context",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Inject Profile Context": {
+        "main": [
+          [
+            {
+              "node": "Execute Core Agent",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Merge person_id": {
+        "main": [
+          [
+            {
+              "node": "Fetch Chat History (Guild)",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Fetch Chat History (Guild)": {
+        "main": [
+          [
+            {
+              "node": "Build Thread Context (Guild)",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Build Thread Context (Guild)": {
+        "main": [
+          [
+            {
+              "node": "Prepare Memory Fetch",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "authors": "Your Name",
+    "name": null,
+    "description": null,
+    "autosaved": false,
+    "workflowPublishHistory": [
+      {
+        "createdAt": "2026-03-10T23:21:35.601Z",
+        "id": 1198,
+        "workflowId": "YOUR_DISCORD_ADAPTER_WORKFLOW_ID",
+        "versionId": "00000000-0000-0000-0000-000000000000",
+        "event": "deactivated",
+        "userId": "00000000-0000-0000-0000-000000000000"
+      },
+      {
+        "createdAt": "2026-03-10T23:21:35.654Z",
+        "id": 1199,
+        "workflowId": "YOUR_DISCORD_ADAPTER_WORKFLOW_ID",
+        "versionId": "00000000-0000-0000-0000-000000000000",
+        "event": "activated",
+        "userId": "00000000-0000-0000-0000-000000000000"
+      }
+    ]
+  }
+}

@@ -1,0 +1,488 @@
+{
+  "id": "03-03-discord-dm-adapter",
+  "name": "03-03 Discord DM Adapter",
+  "nodes": [
+    {
+      "parameters": {
+        "type": "direct-message",
+        "pattern": "every",
+        "additionalFields": {}
+      },
+      "id": "discord-dm-trigger-01",
+      "name": "Discord DM Trigger",
+      "type": "n8n-nodes-discord-trigger.discordTrigger",
+      "typeVersion": 1,
+      "position": [
+        240,
+        304
+      ],
+      "credentials": {
+        "discordBotTriggerApi": {
+          "id": "YOUR_DISCORD_TRIGGER_CREDENTIAL_ID",
+          "name": "Aerys Discord Bot (katerlol)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Filter: Should Respond (DM)\n// DMs: always respond unless from a bot or empty.\n\nconst raw = $input.item.json;\n\n// Ignore messages from bots\nif (raw.author && raw.author.bot) {\n  return [];\n}\n// Also check authorId-based bot detection (katerlol flat fields)\nif (raw.authorBot === true) {\n  return [];\n}\n\n// Ignore empty messages\nif (!raw.content && (!raw.attachments || raw.attachments.length === 0)) {\n  return [];\n}\n\n// DMs: always respond\nreturn [{ json: { ...raw, _shouldRespond: true, _isDM: true } }];"
+      },
+      "id": "dm-filter-01",
+      "name": "Filter: Should Respond (DM)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        464,
+        304
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Normalize DM Message — Discord DM to internal schema\n// DMs: no guildId, channel_id IS the DM channel, is_dm always true\n\nconst raw = $input.item.json;\n\n// katerlol emits flat fields for DMs just like guild messages\nconst userId = raw.authorId || (raw.author && raw.author.id) || 'unknown';\nconst username = raw.authorName || (raw.author && (raw.author.globalName || raw.author.username)) || 'unknown';\nconst channelId = raw.channelId || raw.channel_id || '';\n\nconst normalized = {\n  source_channel: 'discord',\n  channel_id: channelId,\n  guild_id: null,\n  user_id: userId,\n  username: username,\n  message_text: (raw.content || '').trim(),\n  message_id: raw.id || raw.message_id || '',\n  is_dm: true,\n  is_mention: false,\n  is_edit: !!raw.editedTimestamp,\n  conversation_privacy: 'private',\n  attachments: (raw.attachments || []).map(function(a) {\n    return {\n      type: a.contentType || 'unknown',\n      size: a.size || 0,\n      url: a.url || null,\n      filename: a.name || a.filename || 'unknown'\n    };\n  }),\n  timestamp: raw.createdTimestamp || Date.now(),\n  location_label: 'Discord — Private DM',\n  // Phase 4: bare user_id session key — dm_ prefix removed for room-to-room continuity.\n  // Will be overridden to bare person_id after identity resolution in Merge person_id (DM).\n  // Privacy isolation is via conversation_privacy: 'private' flag, NOT session key separation.\n  session_key: userId\n};\n\nreturn [{ json: normalized }];"
+      },
+      "id": "dm-normalize-01",
+      "name": "Normalize DM Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        688,
+        304
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://discord.com/api/v10/channels/{{$json.channel_id}}/typing",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "discordBotApi",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "dm-typing-01",
+      "name": "Send Typing Indicator (DM)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        912,
+        304
+      ],
+      "credentials": {
+        "discordBotApi": {
+          "id": "YOUR_DISCORD_BOT_CREDENTIAL_ID",
+          "name": "Discord Bot account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: $('Normalize DM Message').item.json }];"
+      },
+      "id": "dm-restore-01",
+      "name": "Restore Context (DM)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1120,
+        304
+      ]
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "value": "YOUR_IDENTITY_RESOLVER_WORKFLOW_ID",
+          "mode": "id"
+        },
+        "workflowInputs": {
+          "schema": [
+            {
+              "name": "platform",
+              "type": "string"
+            },
+            {
+              "name": "platform_user_id",
+              "type": "string"
+            },
+            {
+              "name": "username",
+              "type": "string"
+            }
+          ],
+          "mappingMode": "defineBelow",
+          "value": {
+            "platform": "={{ $json.source_channel }}",
+            "platform_user_id": "={{ $json.user_id }}",
+            "username": "={{ $json.username }}"
+          }
+        },
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "id": "dm-resolve-identity-01",
+      "name": "Resolve Identity (DM)",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 2,
+      "position": [
+        1344,
+        304
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Merge person_id + set session key\n// Phase 4: session_key = person_id (bare UUID) for ALL contexts.\n// The dm_ prefix is removed — Aerys follows a person across Discord DMs, guild, and Telegram\n// using one unified conversation buffer per person.\n// Privacy isolation is via conversation_privacy: 'private' flag and privacy_level filtering\n// on long-term memories (Phase 4 Plan 2), NOT by session key separation.\n\nconst resolverOutput = $input.item.json;\nconst originalMsg = $('Restore Context (DM)').item.json;\nconst personId = resolverOutput.person_id;\n\nreturn [{\n  json: {\n    ...originalMsg,\n    person_id: personId,\n    display_name: resolverOutput.display_name,\n    // Bare person_id — enables room-to-room conversation continuity\n    session_key: personId,\n    // Ensure privacy flag is set\n    conversation_privacy: 'private'\n  }\n}];"
+      },
+      "id": "dm-merge-01",
+      "name": "Merge person_id (DM)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1536,
+        304
+      ]
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "value": "YOUR_CORE_AGENT_WORKFLOW_ID",
+          "mode": "id"
+        },
+        "workflowInputs": {
+          "schema": [],
+          "mappingMode": "passthrough",
+          "value": {}
+        },
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "id": "dm-core-agent-01",
+      "name": "Execute Core Agent (DM)",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 2,
+      "position": [
+        3152,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const input = $input.first().json;\nreturn [{\n  json: {\n    person_id: input.person_id,\n    channel_id: input.channel_id || input.session_key,\n    message_text: input.message_content || input.message_text || input.content || '',\n    privacy_context: 'private'\n  }\n}];",
+        "mode": "runOnceForAllItems"
+      },
+      "id": "dm-prep-memory-01",
+      "name": "Prepare Memory Fetch (DM)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2096,
+        304
+      ]
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "value": "YOUR_MEMORY_RETRIEVAL_WORKFLOW_ID",
+          "mode": "id"
+        },
+        "workflowInputs": {
+          "schema": [
+            {
+              "name": "person_id",
+              "type": "string"
+            },
+            {
+              "name": "channel_id",
+              "type": "string"
+            },
+            {
+              "name": "message_text",
+              "type": "string"
+            },
+            {
+              "name": "privacy_context",
+              "type": "string"
+            }
+          ],
+          "mappingMode": "defineBelow",
+          "value": {
+            "person_id": "={{ $json.person_id }}",
+            "channel_id": "={{ $json.channel_id }}",
+            "message_text": "={{ $json.message_text }}",
+            "privacy_context": "={{ $json.privacy_context }}"
+          }
+        },
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "id": "dm-exec-memory-01",
+      "name": "Execute Memory Retrieval (DM)",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 2,
+      "position": [
+        2256,
+        304
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const memResult = $input.first().json;\nconst original = $('Build Thread Context (DM)').item.json;\nreturn [{\n  json: {\n    ...original,\n    memory_context: memResult.memory_context || ''\n  }\n}];"
+      },
+      "id": "dm-merge-memory-01",
+      "name": "Merge Memory Result (DM)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2432,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:5678/webhook/aerys-profile-api",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ person_id: $json.person_id, privacy_context: $json.conversation_privacy || 'private' }) }}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "dm-call-profile-api",
+      "name": "Call Profile API (DM)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2656,
+        320
+      ],
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const profileResp = $input.first().json;\nconst original = $('Merge Memory Result (DM)').item.json;\nconst profileData = profileResp.profile || {};\nconst lines = profileData.lines || [];\nconst coldStart = profileData.cold_start !== undefined ? profileData.cold_start : true;\n\nconst profileContext = lines.length > 0 ? lines.join('\\n') : '';\n\nreturn [{\n  json: {\n    ...original,\n    profile_context: profileContext,\n    cold_start: coldStart\n  }\n}];"
+      },
+      "id": "dm-inject-profile-ctx",
+      "name": "Inject Profile Context (DM)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2832,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH params AS (SELECT $1::text AS sid)\nSELECT role, content, created_at FROM (\n  SELECT \n    h.message->>'type' AS role,\n    h.message->>'content' AS content,\n    h.created_at\n  FROM n8n_chat_histories h\n  JOIN params ON h.session_id = params.sid\n  WHERE h.created_at > NOW() - INTERVAL '7 days'\n  ORDER BY h.created_at DESC\n  LIMIT 20\n) limited\nUNION ALL\nSELECT 'sentinel'::text, NULL::text, NULL::timestamptz\nWHERE NOT EXISTS (\n  SELECT 1 FROM n8n_chat_histories h\n  JOIN params ON h.session_id = params.sid\n  WHERE h.created_at > NOW() - INTERVAL '7 days'\n)",
+        "options": {
+          "queryReplacement": "={{ [$json.session_key] }}"
+        }
+      },
+      "id": "dm-fetch-chat-history-01",
+      "name": "Fetch Chat History (DM)",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        1728,
+        304
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "YOUR_POSTGRES_CREDENTIAL_ID",
+          "name": "Aerys DB (aerys)"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Build timestamped thread context from n8n_chat_histories\n// Receives N items (one per DB row); outputs 1 item with thread_context injected\n\nconst rows = $input.all();\nconst upstream = $('Merge person_id (DM)').item.json;\n\n// Filter out sentinel, nulls, and any error rows\nconst validRows = rows.filter(r =>\n  r.json.role !== 'sentinel' &&\n  r.json.content !== null &&\n  r.json.content !== undefined &&\n  !r.json.error\n);\n\nlet thread_context = null;\n\nif (validRows.length > 0) {\n  // Sort chronologically (query returned DESC)\n  const sorted = validRows.sort((a, b) =>\n    new Date(a.json.created_at) - new Date(b.json.created_at)\n  );\n\n  const displayName = upstream.display_name || upstream.username || 'User';\n\n  const lines = sorted.map(r => {\n    const ts = new Date(r.json.created_at);\n    const formatted = ts.toLocaleString('en-US', {\n      timeZone: 'America/New_York',\n      month: 'short', day: 'numeric',\n      hour: 'numeric', minute: '2-digit',\n      hour12: true, timeZoneName: 'short'\n    });\n    const speaker = r.json.role === 'human' ? displayName : 'Aerys';\n    const content = (r.json.content || '').trim();\n    const snippet = content.length > 300 ? content.substring(0, 300) + '...' : content;\n    return `[${formatted}] ${speaker}: ${snippet}`;\n  });\n\n  thread_context = lines.join('\\n');\n}\n\nreturn [{\n  json: {\n    ...upstream,\n    thread_context\n  }\n}];"
+      },
+      "id": "dm-build-thread-ctx-01",
+      "name": "Build Thread Context (DM)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1920,
+        304
+      ]
+    }
+  ],
+  "connections": {
+    "Discord DM Trigger": {
+      "main": [
+        [
+          {
+            "node": "Filter: Should Respond (DM)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter: Should Respond (DM)": {
+      "main": [
+        [
+          {
+            "node": "Normalize DM Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize DM Message": {
+      "main": [
+        [
+          {
+            "node": "Send Typing Indicator (DM)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Typing Indicator (DM)": {
+      "main": [
+        [
+          {
+            "node": "Restore Context (DM)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Restore Context (DM)": {
+      "main": [
+        [
+          {
+            "node": "Resolve Identity (DM)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Resolve Identity (DM)": {
+      "main": [
+        [
+          {
+            "node": "Merge person_id (DM)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute Core Agent (DM)": {
+      "main": [
+        []
+      ]
+    },
+    "Prepare Memory Fetch (DM)": {
+      "main": [
+        [
+          {
+            "node": "Execute Memory Retrieval (DM)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute Memory Retrieval (DM)": {
+      "main": [
+        [
+          {
+            "node": "Merge Memory Result (DM)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge Memory Result (DM)": {
+      "main": [
+        [
+          {
+            "node": "Call Profile API (DM)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call Profile API (DM)": {
+      "main": [
+        [
+          {
+            "node": "Inject Profile Context (DM)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Inject Profile Context (DM)": {
+      "main": [
+        [
+          {
+            "node": "Execute Core Agent (DM)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge person_id (DM)": {
+      "main": [
+        [
+          {
+            "node": "Fetch Chat History (DM)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Chat History (DM)": {
+      "main": [
+        [
+          {
+            "node": "Build Thread Context (DM)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Thread Context (DM)": {
+      "main": [
+        [
+          {
+            "node": "Prepare Memory Fetch (DM)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  },
+  "staticData": null
+}

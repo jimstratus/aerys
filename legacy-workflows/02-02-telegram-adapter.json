@@ -1,0 +1,1814 @@
+{
+  "id": "02-02-telegram-adapter",
+  "name": "02-02 Telegram Adapter",
+  "nodes": [
+    {
+      "parameters": {
+        "updates": [
+          "message",
+          "edited_message"
+        ],
+        "additionalFields": {}
+      },
+      "id": "telegram-trigger-01",
+      "name": "TelegramTrigger",
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        240,
+        300
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "YOUR_TELEGRAM_CREDENTIAL_ID",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Filter: Should Respond\nconst raw = $input.item.json;\nconst msg = raw.message || raw.edited_message || raw;\n\nconst hasContent = msg.text || msg.caption || msg.document || msg.photo || msg.audio || msg.video;\nif (!hasContent) return [];\n\nconst isEdit = !!raw.edited_message || !!msg.edit_date;\nconst isPrivate = msg.chat ? msg.chat.type === 'private' : true;\nconst entities = msg.entities || msg.caption_entities || [];\nconst isMentioned = isPrivate || entities.some(e => e.type === 'mention');\n\nif (isPrivate) {\n  return [{ json: { ...raw, _msg: msg, _shouldRespond: true, _isEdit: isEdit, _isMentioned: true } }];\n}\n\nif (isEdit) {\n  return isMentioned\n    ? [{ json: { ...raw, _msg: msg, _shouldRespond: true, _isEdit: true, _isMentioned: true } }]\n    : [];\n}\n\nreturn isMentioned\n  ? [{ json: { ...raw, _msg: msg, _shouldRespond: true, _isEdit: false, _isMentioned: true } }]\n  : [];\n"
+      },
+      "id": "filter-should-respond-02",
+      "name": "Filter: Should Respond",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        460,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Normalize Message — Telegram to internal schema\n// Produces the same schema as the Discord adapter.\n\nconst raw = $input.item.json;\nconst msg = raw._msg || raw.message || raw.edited_message || raw;\n\n// Build attachments array — include file_id for URL resolution\nconst attachments = [];\n\nif (msg.document) {\n  attachments.push({\n    type: msg.document.mime_type || 'unknown',\n    size: msg.document.file_size || 0,\n    url: null,\n    filename: msg.document.file_name || 'document',\n    file_id: msg.document.file_id || null\n  });\n}\n\nif (msg.photo && msg.photo.length > 0) {\n  const largest = msg.photo[msg.photo.length - 1];\n  attachments.push({\n    type: 'image/jpeg',\n    size: largest.file_size || 0,\n    url: null,\n    filename: 'photo.jpg',\n    file_id: largest.file_id || null\n  });\n}\n\nif (msg.audio) {\n  attachments.push({\n    type: msg.audio.mime_type || 'audio/unknown',\n    size: msg.audio.file_size || 0,\n    url: null,\n    filename: msg.audio.file_name || 'audio',\n    file_id: msg.audio.file_id || null\n  });\n}\n\nif (msg.video) {\n  attachments.push({\n    type: msg.video.mime_type || 'video/unknown',\n    size: msg.video.file_size || 0,\n    url: null,\n    filename: 'video',\n    file_id: msg.video.file_id || null\n  });\n}\n\nif (msg.voice) {\n  attachments.push({\n    type: msg.voice.mime_type || 'audio/ogg',\n    size: msg.voice.file_size || 0,\n    url: null,\n    filename: 'voice.ogg',\n    file_id: msg.voice.file_id || null\n  });\n}\n\nconst normalized = {\n  source_channel: 'telegram',\n  channel_id: String(msg.chat ? msg.chat.id : ''),\n  guild_id: null,\n  user_id: msg.from ? String(msg.from.id) : 'unknown',\n  username: msg.from ? (msg.from.username || msg.from.first_name || 'unknown') : 'unknown',\n  message_text: (msg.text || msg.caption || '').trim(),\n  message_id: String(msg.message_id || ''),\n  is_dm: msg.chat ? msg.chat.type === 'private' : true,\n  conversation_privacy: msg.chat && msg.chat.type === 'private' ? 'private' : 'public',\n  is_mention: raw._isMentioned || false,\n  is_edit: raw._isEdit || !!msg.edit_date,\n  attachments: attachments,\n  timestamp: ((msg.date || msg.edit_date || Math.floor(Date.now() / 1000)) * 1000),\n  location_label: 'Telegram — ' + (msg.chat && msg.chat.title ? msg.chat.title : (msg.chat && msg.chat.type === 'private' ? 'Private chat' : 'Group chat')),\n  session_key: 'telegram_' + String(msg.chat ? msg.chat.id : '')\n};\n\nreturn [{ json: normalized }];"
+      },
+      "id": "normalize-message-02",
+      "name": "Normalize Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        680,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Detect Command — Telegram adapter\n// Checks if message starts with '!' and parses command + args.\n\nconst msg = $input.item.json;\nconst text = (msg.message_text || '').trim();\n\nconst isCommand = text.startsWith('!');\nlet command = null;\nlet commandArgs = [];\n\nif (isCommand) {\n  const parts = text.slice(1).trim().split(/\\s+/);\n  command = parts[0].toLowerCase();    // 'link', 'unlink', 'profile', 'status'\n  commandArgs = parts.slice(1);\n}\n\nreturn [{\n  json: {\n    ...msg,\n    is_command: isCommand,\n    command: command,\n    command_args: commandArgs\n  }\n}];"
+      },
+      "id": "detect-command-tg-01",
+      "name": "Detect Command",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1120,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "rules",
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict"
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.is_command }}",
+                    "rightValue": true,
+                    "operator": {
+                      "type": "boolean",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Commands"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict"
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.is_command }}",
+                    "rightValue": false,
+                    "operator": {
+                      "type": "boolean",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Chat"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "route-tg-01",
+      "name": "Route",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [
+        1120,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "sendChatAction",
+        "chatId": "={{ $json.channel_id }}",
+        "chatAction": "typing"
+      },
+      "id": "send-typing-02",
+      "name": "Send Typing Indicator",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1340,
+        180
+      ],
+      "continueOnFail": true,
+      "credentials": {
+        "telegramApi": {
+          "id": "YOUR_TELEGRAM_CREDENTIAL_ID",
+          "name": "Telegram account"
+        }
+      },
+      "notes": "Typing indicator expires after 5 seconds. continueOnFail=true so a typing blip never blocks the response."
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "value": "YOUR_IDENTITY_RESOLVER_WORKFLOW_ID",
+          "mode": "id"
+        },
+        "workflowInputs": {
+          "schema": [
+            {
+              "name": "platform",
+              "type": "string"
+            },
+            {
+              "name": "platform_user_id",
+              "type": "string"
+            },
+            {
+              "name": "username",
+              "type": "string"
+            }
+          ],
+          "mappingMode": "defineBelow",
+          "value": {
+            "platform": "={{ $json.source_channel }}",
+            "platform_user_id": "={{ $json.user_id }}",
+            "username": "={{ $json.username }}"
+          }
+        },
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "id": "resolve-identity-tg-chat-01",
+      "name": "Resolve Identity (Chat)",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 2,
+      "position": [
+        1560,
+        180
+      ],
+      "notes": "Calls 03-01 Identity Resolver. Returns person_id, display_name, is_new."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Merge person_id from identity resolver back into the normalized message payload\nconst resolverOutput = $input.item.json;\nconst originalMsg = $('Detect Command').item.json;\n\nreturn [{\n  json: {\n    ...originalMsg,\n    person_id: resolverOutput.person_id,\n    display_name: resolverOutput.display_name\n  }\n}];"
+      },
+      "id": "merge-person-id-tg-chat-01",
+      "name": "Merge person_id (Chat)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1780,
+        180
+      ]
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "value": "YOUR_CORE_AGENT_WORKFLOW_ID",
+          "mode": "id"
+        },
+        "workflowInputs": {
+          "schema": [],
+          "mappingMode": "passthrough",
+          "value": {}
+        },
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "id": "execute-core-agent-02",
+      "name": "Execute Core Agent",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 2,
+      "position": [
+        2350,
+        0
+      ],
+      "notes": "Points to 02-03-core-agent workflow (created in Plan 02-02). Will error until that workflow exists and its ID is set."
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "value": "YOUR_IDENTITY_RESOLVER_WORKFLOW_ID",
+          "mode": "id"
+        },
+        "workflowInputs": {
+          "schema": [
+            {
+              "name": "platform",
+              "type": "string"
+            },
+            {
+              "name": "platform_user_id",
+              "type": "string"
+            },
+            {
+              "name": "username",
+              "type": "string"
+            }
+          ],
+          "mappingMode": "defineBelow",
+          "value": {
+            "platform": "={{ $json.source_channel }}",
+            "platform_user_id": "={{ $json.user_id }}",
+            "username": "={{ $json.username }}"
+          }
+        },
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "id": "resolve-identity-tg-cmd-01",
+      "name": "Resolve Identity (Cmd)",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 2,
+      "position": [
+        1340,
+        440
+      ],
+      "notes": "Calls 03-01 Identity Resolver for commands path. Commands also need a person_id."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Merge person_id from identity resolver back into the command payload\nconst resolverOutput = $input.item.json;\nconst originalMsg = $('Detect Command').item.json;\n\nreturn [{\n  json: {\n    ...originalMsg,\n    person_id: resolverOutput.person_id,\n    display_name: resolverOutput.display_name\n  }\n}];"
+      },
+      "id": "merge-person-id-tg-cmd-01",
+      "name": "Merge person_id (Cmd)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1560,
+        440
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "rules",
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": false,
+                  "leftValue": "",
+                  "typeValidation": "strict"
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.command }}",
+                    "rightValue": "link",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "link"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": false,
+                  "leftValue": "",
+                  "typeValidation": "strict"
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.command }}",
+                    "rightValue": "unlink",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "unlink"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": false,
+                  "leftValue": "",
+                  "typeValidation": "strict"
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.command }}",
+                    "rightValue": "profile",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "profile"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": false,
+                  "leftValue": "",
+                  "typeValidation": "strict"
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.command }}",
+                    "rightValue": "status",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "status"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "command-router-tg-01",
+      "name": "Command Router",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [
+        1780,
+        440
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT pi.platform, pi.platform_user_id, pi.username, p.display_name FROM platform_identities pi JOIN persons p ON p.id = pi.person_id WHERE pi.person_id = $1",
+        "options": {
+          "queryReplacement": "={{ [$json.person_id] }}"
+        }
+      },
+      "id": "get-linked-accounts-tg-01",
+      "name": "Get Linked Accounts",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        2000,
+        580
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "YOUR_POSTGRES_CREDENTIAL_ID",
+          "name": "Aerys DB (aerys)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Format !status reply\nconst rows = $input.all().map(i => i.json).filter(r => r.platform);\nconst displayName = rows[0]?.display_name || 'Unknown';\nconst linked = rows.map(r => `${r.platform} (${r.username || r.platform_user_id})`).join(', ');\nconst chatId = $('Merge person_id (Cmd)').item.json.channel_id;\n\nreturn [{\n  json: {\n    chat_id: chatId,\n    reply_text: `Your identity: *${displayName}*\\nLinked platforms: ${linked || 'none'}`\n  }\n}];"
+      },
+      "id": "format-status-tg-01",
+      "name": "Format Status",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2220,
+        580
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "sendMessage",
+        "chatId": "={{ $json.chat_id }}",
+        "text": "={{ $json.reply_text }}",
+        "additionalFields": {
+          "parse_mode": "Markdown",
+          "appendAttribution": false
+        }
+      },
+      "id": "reply-status-tg-01",
+      "name": "Reply Status",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        2440,
+        580
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "YOUR_TELEGRAM_CREDENTIAL_ID",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.command_args.length }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "check-profile-args-tg-01",
+      "name": "Check Profile Args",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        2000,
+        440
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE persons SET display_name = $1 WHERE id = $2",
+        "options": {
+          "queryReplacement": "={{ [$json.command_args.join(' '), $json.person_id] }}"
+        }
+      },
+      "id": "update-display-name-tg-01",
+      "name": "Update Display Name",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        2220,
+        400
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "YOUR_POSTGRES_CREDENTIAL_ID",
+          "name": "Aerys DB (aerys)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "sendMessage",
+        "chatId": "={{ $('Merge person_id (Cmd)').item.json.channel_id }}",
+        "text": "={{ 'Display name updated to: *' + $('Merge person_id (Cmd)').item.json.command_args.join(' ') + '*' }}",
+        "additionalFields": {
+          "parse_mode": "Markdown",
+          "appendAttribution": false
+        }
+      },
+      "id": "reply-profile-updated-tg-01",
+      "name": "Reply Profile Updated",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        2440,
+        400
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "YOUR_TELEGRAM_CREDENTIAL_ID",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "sendMessage",
+        "chatId": "={{ $json.channel_id }}",
+        "text": "Usage: !profile name <your display name>",
+        "additionalFields": {
+          "appendAttribution": false
+        }
+      },
+      "id": "reply-profile-usage-tg-01",
+      "name": "Reply Profile Usage",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        2220,
+        500
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "YOUR_TELEGRAM_CREDENTIAL_ID",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.command_args.length }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "check-link-args-tg-01",
+      "name": "Check Link Args",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        2000,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Generate 6-char verification code (Math.random - crypto not available in n8n sandbox)\nconst CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';\nlet code = '';\nfor (let i = 0; i < 6; i++) {\n  code += CHARS[Math.floor(Math.random() * CHARS.length)];\n}\nconst expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();\nconst incoming = $input.item.json;\n\nreturn [{ json: { ...incoming, verification_code: code, expires_at: expiresAt } }];"
+      },
+      "id": "generate-link-code-tg-01",
+      "name": "Generate Link Code",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2220,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO pending_links (code, person_id, platform, expires_at) VALUES ($1, $2, $3, $4)",
+        "options": {
+          "queryReplacement": "={{ [$json.verification_code, $json.person_id, 'telegram', $json.expires_at] }}"
+        }
+      },
+      "id": "store-link-code-tg-01",
+      "name": "Store Link Code",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        2440,
+        240
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "YOUR_POSTGRES_CREDENTIAL_ID",
+          "name": "Aerys DB (aerys)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "sendMessage",
+        "chatId": "={{ $('Generate Link Code').item.json.channel_id }}",
+        "text": "={{ 'Your link code is: *' + $('Generate Link Code').item.json.verification_code + '*\\n\\nRun `/link code:' + $('Generate Link Code').item.json.verification_code + '` in Discord within 10 minutes.' }}",
+        "additionalFields": {
+          "parse_mode": "Markdown",
+          "appendAttribution": false
+        }
+      },
+      "id": "reply-link-issue-tg-01",
+      "name": "Reply Link Issue",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        2660,
+        240
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "YOUR_TELEGRAM_CREDENTIAL_ID",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT pl.person_id::text as source_person_id, pl.platform as source_platform FROM pending_links pl WHERE pl.code = $1 AND pl.expires_at > NOW()",
+        "options": {
+          "queryReplacement": "={{ [$json.command_args[0].toUpperCase()] }}"
+        }
+      },
+      "id": "lookup-link-code-tg-01",
+      "name": "Lookup Link Code",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        2220,
+        360
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "YOUR_POSTGRES_CREDENTIAL_ID",
+          "name": "Aerys DB (aerys)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.source_person_id !== null && $json.source_person_id !== undefined }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "check-code-found-tg-01",
+      "name": "Check Code Found",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        2440,
+        360
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.source_person_id }}",
+              "rightValue": "={{ $('Merge person_id (Cmd)').item.json.person_id }}",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "check-same-person-tg-01",
+      "name": "Check Same Person",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        2660,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "sendMessage",
+        "chatId": "={{ $('Merge person_id (Cmd)').item.json.channel_id }}",
+        "text": "Code not found or expired. Run `!link` again to get a new code.",
+        "additionalFields": {
+          "appendAttribution": false
+        }
+      },
+      "id": "reply-code-not-found-tg-01",
+      "name": "Reply Code Not Found",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        2660,
+        440
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "YOUR_TELEGRAM_CREDENTIAL_ID",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "sendMessage",
+        "chatId": "={{ $('Merge person_id (Cmd)').item.json.channel_id }}",
+        "text": "These accounts are already linked.",
+        "additionalFields": {
+          "appendAttribution": false
+        }
+      },
+      "id": "reply-already-linked-tg-01",
+      "name": "Reply Already Linked",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        2880,
+        280
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "YOUR_TELEGRAM_CREDENTIAL_ID",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE platform_identities SET person_id = $1 WHERE person_id = $2",
+        "options": {
+          "queryReplacement": "={{ [$json.source_person_id, $('Merge person_id (Cmd)').item.json.person_id] }}"
+        }
+      },
+      "id": "merge-platform-ids-tg-01",
+      "name": "Merge Platform Identities",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        2880,
+        360
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "YOUR_POSTGRES_CREDENTIAL_ID",
+          "name": "Aerys DB (aerys)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE conversations SET person_id = $1 WHERE person_id = $2",
+        "options": {
+          "queryReplacement": "={{ [$('Check Same Person').item.json.source_person_id, $('Merge person_id (Cmd)').item.json.person_id] }}"
+        }
+      },
+      "id": "merge-conversations-tg-01",
+      "name": "Merge Conversations",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        3100,
+        360
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "YOUR_POSTGRES_CREDENTIAL_ID",
+          "name": "Aerys DB (aerys)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE messages SET person_id = $1 WHERE person_id = $2",
+        "options": {
+          "queryReplacement": "={{ [$('Check Same Person').item.json.source_person_id, $('Merge person_id (Cmd)').item.json.person_id] }}"
+        }
+      },
+      "id": "merge-messages-tg-01",
+      "name": "Merge Messages",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        3320,
+        360
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "YOUR_POSTGRES_CREDENTIAL_ID",
+          "name": "Aerys DB (aerys)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE memories SET person_id = $1 WHERE person_id = $2",
+        "options": {
+          "queryReplacement": "={{ [$('Check Same Person').item.json.source_person_id, $('Merge person_id (Cmd)').item.json.person_id] }}"
+        }
+      },
+      "id": "merge-memories-tg-01",
+      "name": "Merge Memories",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        3540,
+        360
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "YOUR_POSTGRES_CREDENTIAL_ID",
+          "name": "Aerys DB (aerys)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE persons SET deleted_at = NOW() WHERE id = $1",
+        "options": {
+          "queryReplacement": "={{ [$('Merge person_id (Cmd)').item.json.person_id] }}"
+        }
+      },
+      "id": "soft-delete-loser-tg-01",
+      "name": "Soft Delete Loser Person",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        3760,
+        360
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "YOUR_POSTGRES_CREDENTIAL_ID",
+          "name": "Aerys DB (aerys)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "DELETE FROM pending_links WHERE code = $1",
+        "options": {
+          "queryReplacement": "={{ [$('Merge person_id (Cmd)').item.json.command_args[0].toUpperCase()] }}"
+        }
+      },
+      "id": "delete-pending-link-tg-01",
+      "name": "Delete Pending Link",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        3980,
+        360
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "YOUR_POSTGRES_CREDENTIAL_ID",
+          "name": "Aerys DB (aerys)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "sendMessage",
+        "chatId": "={{ $('Merge person_id (Cmd)').item.json.channel_id }}",
+        "text": "Accounts linked! Your Telegram and Discord identities are now unified.",
+        "additionalFields": {
+          "appendAttribution": false
+        }
+      },
+      "id": "reply-link-success-tg-01",
+      "name": "Reply Link Success",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        4200,
+        360
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "YOUR_TELEGRAM_CREDENTIAL_ID",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT count(*) as cnt FROM platform_identities WHERE person_id = $1",
+        "options": {
+          "queryReplacement": "={{ [$json.person_id] }}"
+        }
+      },
+      "id": "count-platform-ids-tg-01",
+      "name": "Count Platform Identities",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        2000,
+        700
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "YOUR_POSTGRES_CREDENTIAL_ID",
+          "name": "Aerys DB (aerys)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ parseInt($json.cnt) }}",
+              "rightValue": 1,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "check-can-unlink-tg-01",
+      "name": "Check Can Unlink",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        2220,
+        700
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "DELETE FROM platform_identities WHERE platform = 'telegram' AND person_id = $1",
+        "options": {
+          "queryReplacement": "={{ [$('Merge person_id (Cmd)').item.json.person_id] }}"
+        }
+      },
+      "id": "delete-telegram-identity-tg-01",
+      "name": "Delete Telegram Identity",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        2440,
+        660
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "YOUR_POSTGRES_CREDENTIAL_ID",
+          "name": "Aerys DB (aerys)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "sendMessage",
+        "chatId": "={{ $('Merge person_id (Cmd)').item.json.channel_id }}",
+        "text": "Unlinked. Your Telegram account is now independent. History is preserved under your previous unified profile.",
+        "additionalFields": {
+          "appendAttribution": false
+        }
+      },
+      "id": "reply-unlinked-tg-01",
+      "name": "Reply Unlinked",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        2660,
+        660
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "YOUR_TELEGRAM_CREDENTIAL_ID",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "sendMessage",
+        "chatId": "={{ $('Merge person_id (Cmd)').item.json.channel_id }}",
+        "text": "No linked account to unlink — you only have one platform connected.",
+        "additionalFields": {
+          "appendAttribution": false
+        }
+      },
+      "id": "reply-cannot-unlink-tg-01",
+      "name": "Reply Cannot Unlink",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        2440,
+        760
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "YOUR_TELEGRAM_CREDENTIAL_ID",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "sendMessage",
+        "chatId": "={{ $json.channel_id }}",
+        "text": "Unknown command. Available: !link, !unlink, !profile name <name>, !status",
+        "additionalFields": {
+          "appendAttribution": false
+        }
+      },
+      "id": "reply-unknown-cmd-tg-01",
+      "name": "Reply Unknown Command",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        2000,
+        860
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "YOUR_TELEGRAM_CREDENTIAL_ID",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "id": "restore-context-tg-chat-01",
+      "name": "Restore Context (Chat)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1450,
+        180
+      ],
+      "parameters": {
+        "jsCode": "// Restore Context (Chat) — bring normalized message back after typing indicator\n// Send Typing Indicator outputs {ok, result}, clobbering the message data.\n// Pull the original payload from Detect Command.\nreturn [{ json: $('Detect Command').item.json }];"
+      }
+    },
+    {
+      "id": "tg-prep-mem-fetch-01",
+      "name": "Prepare Memory Fetch (Chat)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1600,
+        0
+      ],
+      "parameters": {
+        "jsCode": "const input = $input.first().json;\nreturn [{\n  json: {\n    person_id: input.person_id,\n    channel_id: input.chat_id || input.channel_id || input.session_key,\n    message_text: input.message_content || input.message_text || input.content || '',\n    privacy_context: input.conversation_privacy || 'public'\n  }\n}];"
+      }
+    },
+    {
+      "id": "tg-exec-mem-ret-01",
+      "name": "Execute Memory Retrieval (Chat)",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 2,
+      "position": [
+        1850,
+        0
+      ],
+      "parameters": {
+        "workflowId": {
+          "value": "YOUR_MEMORY_RETRIEVAL_WORKFLOW_ID",
+          "mode": "id"
+        },
+        "workflowInputs": {
+          "schema": [
+            {
+              "name": "person_id",
+              "type": "string"
+            },
+            {
+              "name": "channel_id",
+              "type": "string"
+            },
+            {
+              "name": "message_text",
+              "type": "string"
+            },
+            {
+              "name": "privacy_context",
+              "type": "string"
+            }
+          ],
+          "mappingMode": "defineBelow",
+          "value": {
+            "person_id": "={{ $json.person_id }}",
+            "channel_id": "={{ $json.channel_id }}",
+            "message_text": "={{ $json.message_text }}",
+            "privacy_context": "={{ $json.privacy_context }}"
+          }
+        },
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      }
+    },
+    {
+      "id": "tg-merge-mem-01",
+      "name": "Merge Memory Result (Chat)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2100,
+        0
+      ],
+      "parameters": {
+        "jsCode": "const memResult = $input.first().json;\nconst original = $('Merge person_id (Chat)').item.json;\nreturn [{\n  json: {\n    ...original,\n    memory_context: memResult.memory_context || ''\n  }\n}];"
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:5678/webhook/aerys-profile-api",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ person_id: $json.person_id, privacy_context: $json.conversation_privacy || 'public' }) }}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "tg-call-profile-api",
+      "name": "Call Profile API",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2300,
+        0
+      ],
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const profileResp = $input.first().json;\nconst original = $('Merge Memory Result (Chat)').item.json;\nconst profileData = profileResp.profile || {};\nconst lines = profileData.lines || [];\nconst coldStart = profileData.cold_start || false;\n\nconst profileContext = lines.length > 0\n  ? lines.join('\\n')\n  : '';\n\nreturn [{\n  json: {\n    ...original,\n    profile_context: profileContext,\n    cold_start: coldStart\n  }\n}];"
+      },
+      "id": "tg-inject-profile-ctx",
+      "name": "Inject Profile Context",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2500,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://api.telegram.org/botYOUR_TELEGRAM_BOT_TOKEN/getFile",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "file_id",
+              "value": "={{ $json.attachments && $json.attachments[0] && $json.attachments[0].file_id ? $json.attachments[0].file_id : '' }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "tg-get-file-info-01",
+      "name": "Get File Info",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        790,
+        300
+      ],
+      "continueOnFail": true,
+      "notes": "Calls Telegram Bot API getFile to resolve file_id → file_path. continueOnFail handles no-attachment case."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Merge Telegram file URL into attachment from getFile API response\nconst BOT_TOKEN = 'YOUR_TELEGRAM_BOT_TOKEN';\nconst original = $('Normalize Message').item.json;\nconst getFileResp = $json;\n\n// Clone original data\nconst result = JSON.parse(JSON.stringify(original));\n\n// If getFile succeeded, construct the download URL\nif (getFileResp && getFileResp.ok && getFileResp.result && getFileResp.result.file_path) {\n  const fileUrl = `https://api.telegram.org/file/bot${BOT_TOKEN}/${getFileResp.result.file_path}`;\n  if (result.attachments && result.attachments.length > 0) {\n    result.attachments[0].url = fileUrl;\n    // Strip file_id from final output\n    delete result.attachments[0].file_id;\n  }\n} else {\n  // getFile failed or no attachment — strip file_id, keep url as null\n  if (result.attachments) {\n    result.attachments.forEach(a => delete a.file_id);\n  }\n}\n\nreturn [{ json: result }];"
+      },
+      "id": "tg-merge-file-url-01",
+      "name": "Merge File URL",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        900,
+        300
+      ],
+      "notes": "Constructs Telegram file download URL and merges into attachment. Falls back gracefully if getFile failed."
+    }
+  ],
+  "connections": {
+    "TelegramTrigger": {
+      "main": [
+        [
+          {
+            "node": "Filter: Should Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter: Should Respond": {
+      "main": [
+        [
+          {
+            "node": "Normalize Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Message": {
+      "main": [
+        [
+          {
+            "node": "Get File Info",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Detect Command": {
+      "main": [
+        [
+          {
+            "node": "Route",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route": {
+      "main": [
+        [
+          {
+            "node": "Resolve Identity (Cmd)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send Typing Indicator",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Typing Indicator": {
+      "main": [
+        [
+          {
+            "node": "Restore Context (Chat)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Resolve Identity (Chat)": {
+      "main": [
+        [
+          {
+            "node": "Merge person_id (Chat)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge person_id (Chat)": {
+      "main": [
+        [
+          {
+            "node": "Prepare Memory Fetch (Chat)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute Core Agent": {
+      "main": [
+        []
+      ]
+    },
+    "Resolve Identity (Cmd)": {
+      "main": [
+        [
+          {
+            "node": "Merge person_id (Cmd)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge person_id (Cmd)": {
+      "main": [
+        [
+          {
+            "node": "Command Router",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Command Router": {
+      "main": [
+        [
+          {
+            "node": "Check Link Args",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Count Platform Identities",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Check Profile Args",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Get Linked Accounts",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Reply Unknown Command",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Linked Accounts": {
+      "main": [
+        [
+          {
+            "node": "Format Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Status": {
+      "main": [
+        [
+          {
+            "node": "Reply Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reply Status": {
+      "main": [
+        []
+      ]
+    },
+    "Check Profile Args": {
+      "main": [
+        [
+          {
+            "node": "Update Display Name",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Reply Profile Usage",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Display Name": {
+      "main": [
+        [
+          {
+            "node": "Reply Profile Updated",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reply Profile Updated": {
+      "main": [
+        []
+      ]
+    },
+    "Reply Profile Usage": {
+      "main": [
+        []
+      ]
+    },
+    "Check Link Args": {
+      "main": [
+        [
+          {
+            "node": "Generate Link Code",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Lookup Link Code",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Link Code": {
+      "main": [
+        [
+          {
+            "node": "Store Link Code",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Store Link Code": {
+      "main": [
+        [
+          {
+            "node": "Reply Link Issue",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reply Link Issue": {
+      "main": [
+        []
+      ]
+    },
+    "Lookup Link Code": {
+      "main": [
+        [
+          {
+            "node": "Check Code Found",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Code Found": {
+      "main": [
+        [
+          {
+            "node": "Check Same Person",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Reply Code Not Found",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Same Person": {
+      "main": [
+        [
+          {
+            "node": "Reply Already Linked",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Merge Platform Identities",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reply Code Not Found": {
+      "main": [
+        []
+      ]
+    },
+    "Reply Already Linked": {
+      "main": [
+        []
+      ]
+    },
+    "Merge Platform Identities": {
+      "main": [
+        [
+          {
+            "node": "Merge Conversations",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge Conversations": {
+      "main": [
+        [
+          {
+            "node": "Merge Messages",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge Messages": {
+      "main": [
+        [
+          {
+            "node": "Merge Memories",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge Memories": {
+      "main": [
+        [
+          {
+            "node": "Soft Delete Loser Person",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Soft Delete Loser Person": {
+      "main": [
+        [
+          {
+            "node": "Delete Pending Link",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Delete Pending Link": {
+      "main": [
+        [
+          {
+            "node": "Reply Link Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reply Link Success": {
+      "main": [
+        []
+      ]
+    },
+    "Count Platform Identities": {
+      "main": [
+        [
+          {
+            "node": "Check Can Unlink",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Can Unlink": {
+      "main": [
+        [
+          {
+            "node": "Delete Telegram Identity",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Reply Cannot Unlink",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Delete Telegram Identity": {
+      "main": [
+        [
+          {
+            "node": "Reply Unlinked",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reply Unlinked": {
+      "main": [
+        []
+      ]
+    },
+    "Reply Cannot Unlink": {
+      "main": [
+        []
+      ]
+    },
+    "Reply Unknown Command": {
+      "main": [
+        []
+      ]
+    },
+    "Restore Context (Chat)": {
+      "main": [
+        [
+          {
+            "node": "Resolve Identity (Chat)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Memory Fetch (Chat)": {
+      "main": [
+        [
+          {
+            "node": "Execute Memory Retrieval (Chat)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute Memory Retrieval (Chat)": {
+      "main": [
+        [
+          {
+            "node": "Merge Memory Result (Chat)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge Memory Result (Chat)": {
+      "main": [
+        [
+          {
+            "node": "Call Profile API",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call Profile API": {
+      "main": [
+        [
+          {
+            "node": "Inject Profile Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Inject Profile Context": {
+      "main": [
+        [
+          {
+            "node": "Execute Core Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get File Info": {
+      "main": [
+        [
+          {
+            "node": "Merge File URL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge File URL": {
+      "main": [
+        [
+          {
+            "node": "Detect Command",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  },
+  "staticData": null
+}

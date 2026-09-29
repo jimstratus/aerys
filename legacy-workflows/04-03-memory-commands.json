@@ -1,0 +1,1152 @@
+{
+  "id": "04-03-memory-commands",
+  "name": "04-03 Memory Commands",
+  "nodes": [
+    {
+      "id": "mem-cmd-webhook-01",
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        240,
+        300
+      ],
+      "parameters": {
+        "path": "aerys-memory-commands",
+        "httpMethod": "POST",
+        "responseMode": "responseNode",
+        "webhookId": "a1b2c3d4-0003-0003-0003-000000000003"
+      },
+      "webhookId": "00000000-0000-0000-0000-000000000000"
+    },
+    {
+      "id": "mem-cmd-parse-01",
+      "name": "Parse Interaction",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        460,
+        300
+      ],
+      "parameters": {
+        "jsCode": "const body = $input.first().json.body || $input.first().json;\n\n// Type 1 = PING\nif (body.type === 1) {\n  return [{ json: { isPing: true, application_id: body.application_id } }];\n}\n\n// Type 2 = APPLICATION_COMMAND (slash command)\nconst data = body.data || {};\nconst user = body.member?.user || body.user || {};\nconst rawOptions = data.options || [];\n\n// Build options map\nconst options = {};\nfor (const opt of rawOptions) {\n  options[opt.name] = opt.value;\n}\n\nreturn [{\n  json: {\n    isPing: false,\n    commandName: data.name,\n    userId: user.id,\n    username: user.username || user.global_name || 'Unknown',\n    guild_id: body.guild_id,\n    interaction_id: body.id,\n    token: body.token,\n    application_id: body.application_id,\n    options\n  }\n}];"
+      }
+    },
+    {
+      "id": "mem-cmd-is-ping-01",
+      "name": "Is Ping",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        680,
+        300
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.isPing }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "mem-cmd-pong-01",
+      "name": "Respond Ping",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        900,
+        180
+      ],
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "{\"type\":1}",
+        "options": {
+          "responseCode": 200,
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "mem-cmd-deferred-01",
+      "name": "Respond Deferred",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        900,
+        300
+      ],
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "{\"type\":5,\"data\":{\"flags\":64}}",
+        "options": {
+          "responseCode": 200,
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "mem-cmd-resolve-id-01",
+      "name": "Resolve Identity",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 2,
+      "position": [
+        1120,
+        300
+      ],
+      "parameters": {
+        "workflowId": {
+          "value": "YOUR_IDENTITY_RESOLVER_WORKFLOW_ID",
+          "mode": "id"
+        },
+        "options": {},
+        "inputData": "={{ { platform: 'discord', platform_user_id: $json.userId, username: $json.username } }}"
+      }
+    },
+    {
+      "id": "mem-cmd-restore-ctx-01",
+      "name": "Restore Context",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1340,
+        300
+      ],
+      "parameters": {
+        "jsCode": "const parsed = $('Parse Interaction').first().json;\nconst identity = $input.first().json;\nreturn [{ json: {\n  commandName: parsed.commandName,\n  userId: parsed.userId,\n  username: parsed.username,\n  options: parsed.options || {},\n  token: parsed.token,\n  application_id: parsed.application_id,\n  interaction_id: parsed.interaction_id,\n  guild_id: parsed.guild_id,\n  person_id: identity.person_id,\n  display_name: identity.display_name || parsed.username\n} }];"
+      }
+    },
+    {
+      "id": "mem-cmd-route-01",
+      "name": "Route Command",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [
+        1560,
+        300
+      ],
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": false,
+                  "leftValue": "",
+                  "typeValidation": "strict"
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.commandName }}",
+                    "rightValue": "aerys-recall",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "recall"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": false,
+                  "leftValue": "",
+                  "typeValidation": "strict"
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.commandName }}",
+                    "rightValue": "aerys-pin",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "pin"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": false,
+                  "leftValue": "",
+                  "typeValidation": "strict"
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.commandName }}",
+                    "rightValue": "aerys-forget",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "forget"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": false,
+                  "leftValue": "",
+                  "typeValidation": "strict"
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.commandName }}",
+                    "rightValue": "aerys-correct",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "correct"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": false,
+                  "leftValue": "",
+                  "typeValidation": "strict"
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.commandName }}",
+                    "rightValue": "aerys-tell",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "tell"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "mem-cmd-recall-query-01",
+      "name": "Recall Query",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        1800,
+        60
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT core_id, key_label, claim_text, status, locked, confidence\nFROM core_claim\nWHERE speaker_id = $1::uuid AND status IN ('approved','provisional') AND sensitivity IN ('P2','P3')\nORDER BY CASE WHEN locked THEN 0 ELSE 1 END, confidence DESC\nLIMIT 10",
+        "options": {
+          "queryReplacement": "={{ [$json.person_id] }}"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "id": "YOUR_POSTGRES_CREDENTIAL_ID",
+          "name": "Aerys DB (aerys)"
+        }
+      }
+    },
+    {
+      "id": "mem-cmd-recall-format-01",
+      "name": "Format Recall",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2020,
+        60
+      ],
+      "parameters": {
+        "jsCode": "const rows = $input.all().map(i => i.json);\nconst ctx = $('Restore Context').first().json;\n\n// Filter out null rows (UNION sentinel)\nconst realRows = rows.filter(r => r.core_id !== null && r.core_id !== undefined);\n\nif (realRows.length === 0) {\n  return [{ json: { ...ctx, reply: \"I don't have any stored memories about you yet.\" } }];\n}\n\nconst lines = realRows.map(r => {\n  const lock = r.locked ? ' 🔒' : '';\n  const status = r.status === 'provisional' ? ' *(provisional)*' : '';\n  return '• ' + r.claim_text + lock + status;\n});\n\nreturn [{ json: { ...ctx, reply: '**What I remember about you:**\\n' + lines.join('\\n') } }];"
+      }
+    },
+    {
+      "id": "mem-cmd-pin-search-01",
+      "name": "Pin Search",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        1800,
+        200
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT core_id::text, claim_text FROM core_claim WHERE speaker_id = $1::uuid AND claim_text ILIKE $2 LIMIT 1",
+        "options": {
+          "queryReplacement": "={{ [$json.person_id, '%' + ($json.options.fact || '') + '%'] }}"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "id": "YOUR_POSTGRES_CREDENTIAL_ID",
+          "name": "Aerys DB (aerys)"
+        }
+      }
+    },
+    {
+      "id": "mem-cmd-pin-found-01",
+      "name": "Pin Found Check",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        2020,
+        200
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.core_id !== null && $json.core_id !== undefined && $json.core_id !== '' }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "mem-cmd-pin-not-found-01",
+      "name": "Pin Not Found",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2240,
+        140
+      ],
+      "parameters": {
+        "jsCode": "const ctx = $('Restore Context').first().json;\nreturn [{ json: { ...ctx, reply: \"I couldn't find a memory matching that.\" } }];"
+      }
+    },
+    {
+      "id": "mem-cmd-pin-api-01",
+      "name": "Pin API Call",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2240,
+        260
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:5678/webhook/aerys-override-api",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({action: 'lock', core_id: $json.core_id, speaker_id: $('Restore Context').first().json.person_id}) }}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "mem-cmd-pin-reply-01",
+      "name": "Pin Reply",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2460,
+        260
+      ],
+      "parameters": {
+        "jsCode": "const ctx = $('Restore Context').first().json;\nconst found = $('Pin Search').first().json;\nreturn [{ json: { ...ctx, reply: 'Locked: **' + found.claim_text + '** — I won\\'t overwrite this.' } }];"
+      }
+    },
+    {
+      "id": "mem-cmd-forget-search-01",
+      "name": "Forget Search",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        1800,
+        340
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT core_id::text, claim_text, locked FROM core_claim WHERE speaker_id = $1::uuid AND claim_text ILIKE $2 LIMIT 1",
+        "options": {
+          "queryReplacement": "={{ [$json.person_id, '%' + ($json.options.fact || '') + '%'] }}"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "id": "YOUR_POSTGRES_CREDENTIAL_ID",
+          "name": "Aerys DB (aerys)"
+        }
+      }
+    },
+    {
+      "id": "mem-cmd-forget-found-01",
+      "name": "Forget Found Check",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        2020,
+        340
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.core_id !== null && $json.core_id !== undefined && $json.core_id !== '' }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "mem-cmd-forget-not-found-01",
+      "name": "Forget Not Found",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2240,
+        280
+      ],
+      "parameters": {
+        "jsCode": "const ctx = $('Restore Context').first().json;\nreturn [{ json: { ...ctx, reply: \"I couldn't find a memory matching that.\" } }];"
+      }
+    },
+    {
+      "id": "mem-cmd-forget-locked-check-01",
+      "name": "Forget Locked Check",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        2240,
+        400
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.locked }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "mem-cmd-forget-is-locked-01",
+      "name": "Forget Is Locked Reply",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2460,
+        340
+      ],
+      "parameters": {
+        "jsCode": "const ctx = $('Restore Context').first().json;\nreturn [{ json: { ...ctx, reply: 'That memory is locked. Use /aerys-correct to update a locked memory, or it cannot be forgotten.' } }];"
+      }
+    },
+    {
+      "id": "mem-cmd-forget-api-01",
+      "name": "Forget API Call",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2460,
+        460
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:5678/webhook/aerys-override-api",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({action: 'retract', core_id: $json.core_id, speaker_id: $('Restore Context').first().json.person_id}) }}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "mem-cmd-forget-reply-01",
+      "name": "Forget Reply",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2680,
+        460
+      ],
+      "parameters": {
+        "jsCode": "const ctx = $('Restore Context').first().json;\nreturn [{ json: { ...ctx, reply: \"Done — I've retracted that memory.\" } }];"
+      }
+    },
+    {
+      "id": "mem-cmd-correct-search-01",
+      "name": "Correct Search",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        1800,
+        480
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT core_id::text, claim_text FROM core_claim WHERE speaker_id = $1::uuid AND claim_text ILIKE $2 LIMIT 1",
+        "options": {
+          "queryReplacement": "={{ [$json.person_id, '%' + ($json.options.fact || '') + '%'] }}"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "id": "YOUR_POSTGRES_CREDENTIAL_ID",
+          "name": "Aerys DB (aerys)"
+        }
+      }
+    },
+    {
+      "id": "mem-cmd-correct-found-01",
+      "name": "Correct Found Check",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        2020,
+        480
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.core_id !== null && $json.core_id !== undefined && $json.core_id !== '' }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "mem-cmd-correct-not-found-01",
+      "name": "Correct Not Found",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2240,
+        420
+      ],
+      "parameters": {
+        "jsCode": "const ctx = $('Restore Context').first().json;\nreturn [{ json: { ...ctx, reply: \"I couldn't find a memory matching that.\" } }];"
+      }
+    },
+    {
+      "id": "mem-cmd-correct-api-01",
+      "name": "Correct API Call",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2240,
+        540
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:5678/webhook/aerys-override-api",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({action: 'correct', core_id: $json.core_id, speaker_id: $('Restore Context').first().json.person_id, new_value: $('Restore Context').first().json.options.value}) }}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "mem-cmd-correct-reply-01",
+      "name": "Correct Reply",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2460,
+        540
+      ],
+      "parameters": {
+        "jsCode": "const ctx = $('Restore Context').first().json;\nreturn [{ json: { ...ctx, reply: \"Updated — I've noted the correction.\" } }];"
+      }
+    },
+    {
+      "id": "mem-cmd-tell-api-01",
+      "name": "Tell API Call",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1800,
+        620
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:5678/webhook/aerys-override-api",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({action: 'add', speaker_id: $json.person_id, key_label: 'user.stated', claim_text: $json.options.fact}) }}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "mem-cmd-tell-reply-01",
+      "name": "Tell Reply",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2020,
+        620
+      ],
+      "parameters": {
+        "jsCode": "const ctx = $('Restore Context').first().json;\nreturn [{ json: { ...ctx, reply: \"Got it — I've added that to what I know about you.\" } }];"
+      }
+    },
+    {
+      "id": "mem-cmd-send-reply-01",
+      "name": "Send Ephemeral Reply",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2700,
+        300
+      ],
+      "parameters": {
+        "method": "PATCH",
+        "url": "https://discord.com/api/v10/webhooks/{{ $json.application_id }}/{{ $json.token }}/messages/@original",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({content: $json.reply, flags: 64}) }}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": {
+      "main": [
+        [
+          {
+            "node": "Parse Interaction",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Interaction": {
+      "main": [
+        [
+          {
+            "node": "Is Ping",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Ping": {
+      "main": [
+        [
+          {
+            "node": "Respond Ping",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond Deferred",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Respond Deferred": {
+      "main": [
+        [
+          {
+            "node": "Resolve Identity",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Resolve Identity": {
+      "main": [
+        [
+          {
+            "node": "Restore Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Restore Context": {
+      "main": [
+        [
+          {
+            "node": "Route Command",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route Command": {
+      "main": [
+        [
+          {
+            "node": "Recall Query",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Pin Search",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Forget Search",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Correct Search",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Tell API Call",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Recall Query": {
+      "main": [
+        [
+          {
+            "node": "Format Recall",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Recall": {
+      "main": [
+        [
+          {
+            "node": "Send Ephemeral Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pin Search": {
+      "main": [
+        [
+          {
+            "node": "Pin Found Check",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pin Found Check": {
+      "main": [
+        [
+          {
+            "node": "Pin API Call",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Pin Not Found",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pin API Call": {
+      "main": [
+        [
+          {
+            "node": "Pin Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pin Reply": {
+      "main": [
+        [
+          {
+            "node": "Send Ephemeral Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pin Not Found": {
+      "main": [
+        [
+          {
+            "node": "Send Ephemeral Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Forget Search": {
+      "main": [
+        [
+          {
+            "node": "Forget Found Check",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Forget Found Check": {
+      "main": [
+        [
+          {
+            "node": "Forget Locked Check",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Forget Not Found",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Forget Locked Check": {
+      "main": [
+        [
+          {
+            "node": "Forget Is Locked Reply",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Forget API Call",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Forget Is Locked Reply": {
+      "main": [
+        [
+          {
+            "node": "Send Ephemeral Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Forget API Call": {
+      "main": [
+        [
+          {
+            "node": "Forget Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Forget Reply": {
+      "main": [
+        [
+          {
+            "node": "Send Ephemeral Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Forget Not Found": {
+      "main": [
+        [
+          {
+            "node": "Send Ephemeral Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Correct Search": {
+      "main": [
+        [
+          {
+            "node": "Correct Found Check",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Correct Found Check": {
+      "main": [
+        [
+          {
+            "node": "Correct API Call",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Correct Not Found",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Correct API Call": {
+      "main": [
+        [
+          {
+            "node": "Correct Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Correct Reply": {
+      "main": [
+        [
+          {
+            "node": "Send Ephemeral Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Correct Not Found": {
+      "main": [
+        [
+          {
+            "node": "Send Ephemeral Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Tell API Call": {
+      "main": [
+        [
+          {
+            "node": "Tell Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Tell Reply": {
+      "main": [
+        [
+          {
+            "node": "Send Ephemeral Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  },
+  "staticData": null
+}

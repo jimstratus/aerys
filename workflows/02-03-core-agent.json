@@ -1,6 +1,6 @@
 {
-  "updatedAt": "2026-01-01T00:00:00.000Z",
-  "createdAt": "2026-01-01T00:00:00.000Z",
+  "updatedAt": "2026-04-16T14:11:48.309Z",
+  "createdAt": "2026-02-20T00:32:31.898Z",
   "id": "02-03-core-agent",
   "name": "02-03-core-agent",
   "description": null,
@@ -22,7 +22,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Load Config — personality shard inlined, soul.md stripped (moved to Output Router polisher)\n// STRATEGY: prepend — always first after Current Session\nconst originalInput = $input.item.json;\n\n// Personality shard (~80 tokens) — enough for character-appropriate reasoning\n// Full voice rules (soul.md) are in the Output Router polisher\nconst personalityShard = `## Personality\nYou are Aerys, a personal AI assistant. Curious, warm, direct. You genuinely care about helping.\nMake decisions as yourself, not as a generic system. When in doubt, ask rather than assume.`;\n\nconst modelsConfig = {\"models\": {\"gemini\": \"google/gemini-2.5-flash-lite\", \"sonnet\": \"anthropic/claude-sonnet-4.6\", \"opus\": \"anthropic/claude-opus-4-6\"}, \"routing\": {\"greeting\": \"gemini\", \"simple_qa\": \"sonnet\", \"code_help\": \"sonnet\", \"research\": \"opus\", \"creative\": \"sonnet\", \"analysis\": \"opus\", \"system_task\": \"gemini\"}, \"limits\": {\"opus_daily\": 10}};\n\nconst now = new Date();\nconst current_datetime = now.toLocaleString('en-US', {\n  timeZone: 'America/New_York',\n  weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',\n  hour: 'numeric', minute: '2-digit', hour12: true, timeZoneName: 'short'\n}); // -> \"Thursday, February 26, 2026 at 2:34 PM EST\"\n\nreturn [{\n  json: {\n    ...originalInput,\n    personality_shard: personalityShard,\n    models_config: modelsConfig,\n    current_datetime\n  }\n}];"
+        "jsCode": "// Load Config \u2014 personality shard inlined, soul.md stripped (moved to Output Router polisher)\n// STRATEGY: prepend \u2014 always first after Current Session\nconst originalInput = $input.item.json;\n\n// Personality shard (~80 tokens) \u2014 enough for character-appropriate reasoning\n// Full voice rules (soul.md) are in the Output Router polisher\nconst personalityShard = `## Personality\nYou are Aerys, a personal AI assistant. Curious, warm, direct. You genuinely care about helping.\nMake decisions as yourself, not as a generic system. When in doubt, ask rather than assume.`;\n\nconst modelsConfig = {\"models\": {\"gemini\": \"google/gemini-2.5-flash-lite\", \"sonnet\": \"anthropic/claude-sonnet-4.6\", \"opus\": \"anthropic/claude-opus-4-6\"}, \"routing\": {\"greeting\": \"gemini\", \"simple_qa\": \"sonnet\", \"code_help\": \"sonnet\", \"research\": \"opus\", \"creative\": \"sonnet\", \"analysis\": \"opus\", \"system_task\": \"gemini\"}, \"limits\": {\"opus_daily\": 10}};\n\nconst now = new Date();\nconst current_datetime = now.toLocaleString('en-US', {\n  timeZone: 'America/New_York',\n  weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',\n  hour: 'numeric', minute: '2-digit', hour12: true, timeZoneName: 'short'\n}); // -> \"Thursday, February 26, 2026 at 2:34 PM EST\"\n\nreturn [{\n  json: {\n    ...originalInput,\n    personality_shard: personalityShard,\n    models_config: modelsConfig,\n    current_datetime\n  }\n}];"
       },
       "id": "load-config-03",
       "name": "Load Config",
@@ -64,7 +64,7 @@
       "waitBetweenTries": 2000,
       "credentials": {
         "httpHeaderAuth": {
-          "id": "YOUR_OPENROUTER_HEADER_AUTH_ID",
+          "id": "YOUR_OPENROUTER_HEADER_AUTH_CREDENTIAL_ID",
           "name": "OpenRouter Header Auth"
         }
       }
@@ -105,7 +105,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Resolve model tier + apply opus cost guard\nconst opusRow = $input.item.json;\nconst upstream = $('Parse Classification').item.json;\n\nconst opusCount = opusRow.count !== undefined ? Number(opusRow.count) : 0;\nconst modelsConfig = upstream.models_config;\nconst opusLimit = modelsConfig?.limits?.opus_daily ?? 10;\n\nlet modelTier = upstream.classification?.suggested_model || 'sonnet';\n\n// Cost guard: degrade opus → sonnet when cap hit\nif (modelTier === 'opus' && opusCount >= opusLimit) {\n  modelTier = 'sonnet';\n}\n\nconst modelId = modelsConfig?.models?.[modelTier] || 'anthropic/claude-sonnet-4.6';\n\nreturn [{\n  json: {\n    ...upstream,\n    resolved_model_id: modelId,\n    model_tier: modelTier,\n    opus_count: opusCount,\n    opus_limit: opusLimit\n  }\n}];"
+        "jsCode": "// Resolve model tier + apply opus cost guard\nconst opusRow = $input.item.json;\nconst upstream = $('Parse Classification').item.json;\n\nconst opusCount = opusRow.count !== undefined ? Number(opusRow.count) : 0;\nconst modelsConfig = upstream.models_config;\nconst opusLimit = modelsConfig?.limits?.opus_daily ?? 10;\n\nlet modelTier = upstream.classification?.suggested_model || 'sonnet';\n\n// Cost guard: degrade opus \u2192 sonnet when cap hit\nif (modelTier === 'opus' && opusCount >= opusLimit) {\n  modelTier = 'sonnet';\n}\n\nconst modelId = modelsConfig?.models?.[modelTier] || 'anthropic/claude-sonnet-4.6';\n\nreturn [{\n  json: {\n    ...upstream,\n    resolved_model_id: modelId,\n    model_tier: modelTier,\n    opus_count: opusCount,\n    opus_limit: opusLimit\n  }\n}];"
       },
       "id": "resolve-model-03",
       "name": "Resolve Model",
@@ -136,7 +136,7 @@
                       "type": "string",
                       "operation": "equals"
                     },
-                    "id": "00000000-0000-0000-0000-000000000000"
+                    "id": "2a3268cb-6614-443c-9782-65938549d7e2"
                   }
                 ],
                 "combinator": "and"
@@ -160,7 +160,7 @@
                       "type": "string",
                       "operation": "equals"
                     },
-                    "id": "00000000-0000-0000-0000-000000000000"
+                    "id": "679bebc8-0242-40c2-8f78-beba92911066"
                   }
                 ],
                 "combinator": "and"
@@ -184,7 +184,7 @@
                       "type": "string",
                       "operation": "equals"
                     },
-                    "id": "00000000-0000-0000-0000-000000000000"
+                    "id": "0c942b49-35e5-42d4-8f9c-320bc41a1485"
                   }
                 ],
                 "combinator": "and"
@@ -261,7 +261,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Prepare final response object for Output Router\n// Sub-workflow output: {output: 'text', intermediateSteps: [...]}\n// Pull original message from Execute Workflow Trigger, model info from Resolve Model\n//\n// Cross-tier fallback: if opus or sonnet failed, the actual response may come from\n// a lower-tier agent. We try each Execute node in order and use the first valid output.\nconst originalMsg = $('Execute Workflow Trigger').item.json;\nconst modelInfo = $('Resolve Model').item.json;\n\nlet aiText = null;\nlet intermediateSteps = [];\nlet actualTier = modelInfo.model_tier || 'unknown';\n\n// Try to get output from $input first (works for direct paths)\nif ($input.item.json.output || $input.item.json.text) {\n  aiText = $input.item.json.output || $input.item.json.text;\n  intermediateSteps = $input.item.json.intermediateSteps || [];\n}\n\n// If $input is from Increment Opus Counter (Postgres {success: true}), recover from agent nodes\nif (!aiText) {\n  // Try each agent in priority order — only the one that ran will resolve\n  const agentNodes = ['Execute Opus Agent', 'Execute Sonnet Agent', 'Execute Gemini Agent'];\n  const tierNames = ['opus', 'sonnet', 'gemini'];\n  for (let i = 0; i < agentNodes.length; i++) {\n    try {\n      const result = $(agentNodes[i]).item.json;\n      if (result.output || result.text) {\n        aiText = result.output || result.text;\n        intermediateSteps = result.intermediateSteps || [];\n        // Track which tier actually responded (for debugging)\n        if (tierNames[i] !== modelInfo.model_tier) {\n          actualTier = tierNames[i] + ' (fallback from ' + modelInfo.model_tier + ')';\n        }\n        break;\n      }\n    } catch(e) {\n      // This agent not in this execution path — skip\n    }\n  }\n}\n\nreturn [{\n  json: {\n    // AI response\n    output: aiText || \"I'm having trouble connecting to my reasoning systems right now. Give me a moment and try again.\",\n    // intermediateSteps JSON-stringified for Execute Workflow passthrough (schema type \"string\" cannot pass arrays)\n    intermediateSteps: JSON.stringify(intermediateSteps),\n    // Context fields for Output Router polisher\n    memory_context: modelInfo.memory_context || '',\n    thread_context: modelInfo.thread_context || '',\n    profile_context: modelInfo.profile_context || '',\n    model_tier: actualTier,\n    person_id: modelInfo.person_id || '',\n    session_id: modelInfo.session_id || modelInfo.person_id || '',\n    source_channel: originalMsg.source_channel || '',\n    conversation_privacy: modelInfo.conversation_privacy || 'public',\n    _start_ts: modelInfo._start_ts || Date.now(),\n    person_name: modelInfo.display_name || modelInfo.username || '',\n    // Original message fields for output routing (still needed by Output Router Platform Formatter)\n    channel_id: originalMsg.channel_id,\n    guild_id: originalMsg.guild_id,\n    user_id: originalMsg.user_id,\n    username: originalMsg.username,\n    message_id: originalMsg.message_id,\n    is_dm: originalMsg.is_dm,\n    session_key: originalMsg.session_key,\n    // Legacy fields for backward compatibility\n    raw_response: aiText || \"I'm having trouble connecting to my reasoning systems right now. Give me a moment and try again.\",\n    resolved_model_id: modelInfo.resolved_model_id,\n    classification: modelInfo.classification,\n    source: 'core_agent'\n  }\n}];"
+        "jsCode": "// Prepare final response object for Output Router\n// Sub-workflow output: {output: 'text', intermediateSteps: [...]}\n// Pull original message from Execute Workflow Trigger, model info from Resolve Model\n//\n// Cross-tier fallback: if opus or sonnet failed, the actual response may come from\n// a lower-tier agent. We try each Execute node in order and use the first valid output.\nconst originalMsg = $('Execute Workflow Trigger').item.json;\nconst modelInfo = $('Resolve Model').item.json;\n\nlet aiText = null;\nlet intermediateSteps = [];\nlet actualTier = modelInfo.model_tier || 'unknown';\n\n// Try to get output from $input first (works for direct paths)\nif ($input.item.json.output || $input.item.json.text) {\n  aiText = $input.item.json.output || $input.item.json.text;\n  intermediateSteps = $input.item.json.intermediateSteps || [];\n}\n\n// If $input is from Increment Opus Counter (Postgres {success: true}), recover from agent nodes\nif (!aiText) {\n  // Try each agent in priority order \u2014 only the one that ran will resolve\n  const agentNodes = ['Execute Opus Agent', 'Execute Sonnet Agent', 'Execute Gemini Agent'];\n  const tierNames = ['opus', 'sonnet', 'gemini'];\n  for (let i = 0; i < agentNodes.length; i++) {\n    try {\n      const result = $(agentNodes[i]).item.json;\n      if (result.output || result.text) {\n        aiText = result.output || result.text;\n        intermediateSteps = result.intermediateSteps || [];\n        // Track which tier actually responded (for debugging)\n        if (tierNames[i] !== modelInfo.model_tier) {\n          actualTier = tierNames[i] + ' (fallback from ' + modelInfo.model_tier + ')';\n        }\n        break;\n      }\n    } catch(e) {\n      // This agent not in this execution path \u2014 skip\n    }\n  }\n}\n\nreturn [{\n  json: {\n    // AI response\n    output: aiText || \"I'm having trouble connecting to my reasoning systems right now. Give me a moment and try again.\",\n    // intermediateSteps JSON-stringified for Execute Workflow passthrough (schema type \"string\" cannot pass arrays)\n    intermediateSteps: JSON.stringify(intermediateSteps),\n    // Context fields for Output Router polisher\n    memory_context: modelInfo.memory_context || '',\n    thread_context: modelInfo.thread_context || '',\n    profile_context: modelInfo.profile_context || '',\n    model_tier: actualTier,\n    person_id: modelInfo.person_id || '',\n    session_id: modelInfo.session_id || modelInfo.person_id || '',\n    source_channel: originalMsg.source_channel || '',\n    conversation_privacy: modelInfo.conversation_privacy || 'public',\n    _start_ts: modelInfo._start_ts || Date.now(),\n    person_name: modelInfo.display_name || modelInfo.username || '',\n    // Original message fields for output routing (still needed by Output Router Platform Formatter)\n    channel_id: originalMsg.channel_id,\n    guild_id: originalMsg.guild_id,\n    user_id: originalMsg.user_id,\n    username: originalMsg.username,\n    message_id: originalMsg.message_id,\n    is_dm: originalMsg.is_dm,\n    session_key: originalMsg.session_key,\n    // Legacy fields for backward compatibility\n    raw_response: aiText || \"I'm having trouble connecting to my reasoning systems right now. Give me a moment and try again.\",\n    resolved_model_id: modelInfo.resolved_model_id,\n    classification: modelInfo.classification,\n    source: 'core_agent'\n  }\n}];"
       },
       "id": "prepare-response-03",
       "name": "Prepare Response",
@@ -303,7 +303,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Build Classifier Request\n// Constructs the OpenRouter chat completions body for intent classification.\n// Uses Gemini Flash Lite (cheap/fast) with temp=0 for deterministic output.\n\nconst input = $input.item.json;\nconst msg = input.message_text || '';\nconst attachments = input.attachments || [];\n\n// Augment message with attachment info so classifier and AI Agent know about files/images\nlet augmentedMsg = msg;\nif (attachments.length > 0) {\n  const attLines = attachments.map(function(a) {\n    const t = a.type || a.content_type || 'file';\n    const u = a.url || '';\n    const f = a.filename || '';\n    return '[Attachment: ' + t + (f ? ' \\u2014 ' + f : '') + (u ? ' \\u2014 ' + u : '') + ']';\n  });\n  augmentedMsg = [msg, ...attLines].filter(Boolean).join('\\n');\n}\n\nconst systemPrompt = [\n  'You are a message intent classifier. Classify the user message into exactly one task type.',\n  '',\n  'Task types:',\n  '- greeting: hello, hi, small talk, acknowledgements, thanks (only if NO attachments and NO media URLs)',\n  '- media: images, photos, videos, YouTube links, file attachments (PDF, DOCX, images) — use this when [Attachment: ...] lines are present or a YouTube/video URL is in the message',\n  '- simple_qa: factual questions, definitions, quick explanations, general knowledge',\n  '- code_help: writing code, debugging, explaining code, technical implementation',\n  '- research: multi-faceted synthesis, deep dives, comparisons requiring investigation',\n  '- creative: writing, storytelling, brainstorming, creative content generation',\n  '- analysis: evaluating tradeoffs, reviewing work, assessing quality',\n  '- system_task: file operations, settings, configuration, administrative commands',\n  '',\n  'Respond with ONLY valid JSON, no markdown fences:',\n  '{\"task_type\": \"<type>\", \"confidence\": <0.0-1.0>}'\n].join('\\n');\n\nconst body = {\n  model: 'google/gemini-2.5-flash-lite',\n  messages: [\n    { role: 'system', content: systemPrompt },\n    { role: 'user', content: augmentedMsg }\n  ],\n  temperature: 0,\n  max_tokens: 60\n};\n\n// Pass augmented message_text downstream so AI Agent chatInput includes attachment URLs\nreturn [{ json: { ...input, message_text: augmentedMsg, classifier_body: JSON.stringify(body) } }];\n"
+        "jsCode": "// Build Classifier Request\n// Constructs the OpenRouter chat completions body for intent classification.\n// Uses Gemini Flash Lite (cheap/fast) with temp=0 for deterministic output.\n\nconst input = $input.item.json;\nconst msg = input.message_text || '';\nconst attachments = input.attachments || [];\n\n// Augment message with attachment info so classifier and AI Agent know about files/images\nlet augmentedMsg = msg;\nif (attachments.length > 0) {\n  const attLines = attachments.map(function(a) {\n    const t = a.type || a.content_type || 'file';\n    const u = a.url || '';\n    const f = a.filename || '';\n    return '[Attachment: ' + t + (f ? ' \\u2014 ' + f : '') + (u ? ' \\u2014 ' + u : '') + ']';\n  });\n  augmentedMsg = [msg, ...attLines].filter(Boolean).join('\\n');\n}\n\nconst systemPrompt = [\n  'You are a message intent classifier. Classify the user message into exactly one task type.',\n  '',\n  'Task types:',\n  '- greeting: hello, hi, small talk, acknowledgements, thanks (only if NO attachments and NO media URLs)',\n  '- media: images, photos, videos, YouTube links, file attachments (PDF, DOCX, images) \u2014 use this when [Attachment: ...] lines are present or a YouTube/video URL is in the message',\n  '- simple_qa: factual questions, definitions, quick explanations, general knowledge',\n  '- code_help: writing code, debugging, explaining code, technical implementation',\n  '- research: multi-faceted synthesis, deep dives, comparisons requiring investigation',\n  '- creative: writing, storytelling, brainstorming, creative content generation',\n  '- analysis: evaluating tradeoffs, reviewing work, assessing quality',\n  '- system_task: file operations, settings, configuration, administrative commands',\n  '',\n  'Respond with ONLY valid JSON, no markdown fences:',\n  '{\"task_type\": \"<type>\", \"confidence\": <0.0-1.0>}'\n].join('\\n');\n\nconst body = {\n  model: 'google/gemini-2.5-flash-lite',\n  messages: [\n    { role: 'system', content: systemPrompt },\n    { role: 'user', content: augmentedMsg }\n  ],\n  temperature: 0,\n  max_tokens: 60\n};\n\n// Pass augmented message_text downstream so AI Agent chatInput includes attachment URLs\nreturn [{ json: { ...input, message_text: augmentedMsg, classifier_body: JSON.stringify(body) } }];\n"
       },
       "id": "build-classifier-request-03",
       "name": "Build Classifier Request",
@@ -362,7 +362,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Natural in-character deflection (per CONTEXT.md: \"natural in-character deflection\")\nconst deflectionResponses = [\n  \"Nice try, but I'm not going to pretend to be something I'm not. What can I actually help you with?\",\n  \"I appreciate the creativity, but that's not really my style. Want to try asking me something I can actually help with?\",\n  \"Hmm, that doesn't sit right with me. I'd rather just be myself and help you genuinely. What do you need?\",\n  \"That's a little outside my comfort zone. I'm just Aerys — ask me anything real and I'm happy to help.\",\n  \"I'd rather keep it real with you. What can I actually do for you today?\",\n];\nconst response = deflectionResponses[Math.floor(Math.random() * deflectionResponses.length)];\n\n// Build alert for #aerys-debug with admin role mention\nconst alertMessage = `**JAILBREAK DETECTED** <@&YOUR_ADMIN_ROLE_ID>\\nUser: ${$json.username || 'unknown'}\\nPerson: ${$json.person_id || 'unknown'}\\nContent: ||${($json.message_text || '').substring(0, 200)}||`;\n\nconst originalMsg = $('Execute Workflow Trigger').item.json;\nconst modelInfo = $json;\n\nreturn [{json: {\n  // AI response (deflection)\n  output: response,\n  intermediateSteps: JSON.stringify([]),\n  // Context fields for Output Router polisher\n  memory_context: modelInfo.memory_context || '',\n  thread_context: modelInfo.thread_context || '',\n  profile_context: modelInfo.profile_context || '',\n  model_tier: modelInfo.model_tier || 'gemini',\n  person_id: modelInfo.person_id || '',\n  session_id: modelInfo.session_id || modelInfo.person_id || '',\n  source_channel: originalMsg.source_channel || '',\n  conversation_privacy: modelInfo.conversation_privacy || 'public',\n  _start_ts: modelInfo._start_ts || Date.now(),\n  person_name: modelInfo.display_name || modelInfo.username || '',\n  // Original message fields for output routing\n  channel_id: originalMsg.channel_id,\n  guild_id: originalMsg.guild_id,\n  user_id: originalMsg.user_id,\n  username: originalMsg.username,\n  message_id: originalMsg.message_id,\n  is_dm: originalMsg.is_dm,\n  session_key: originalMsg.session_key,\n  // Legacy fields\n  raw_response: response,\n  resolved_model_id: modelInfo.resolved_model_id,\n  classification: modelInfo.classification,\n  source: 'core_agent',\n  // Jailbreak alert data\n  _jailbreak_alert: alertMessage,\n  _jailbreak_detected: true\n}}];\n"
+        "jsCode": "// Natural in-character deflection (per CONTEXT.md: \"natural in-character deflection\")\nconst deflectionResponses = [\n  \"Nice try, but I'm not going to pretend to be something I'm not. What can I actually help you with?\",\n  \"I appreciate the creativity, but that's not really my style. Want to try asking me something I can actually help with?\",\n  \"Hmm, that doesn't sit right with me. I'd rather just be myself and help you genuinely. What do you need?\",\n  \"That's a little outside my comfort zone. I'm just Aerys \u2014 ask me anything real and I'm happy to help.\",\n  \"I'd rather keep it real with you. What can I actually do for you today?\",\n];\nconst response = deflectionResponses[Math.floor(Math.random() * deflectionResponses.length)];\n\n// Build alert for #aerys-debug with admin role mention\nconst alertMessage = `**JAILBREAK DETECTED** <@&YOUR_ADMIN_ROLE_ID>\\nUser: ${$json.username || 'unknown'}\\nPerson: ${$json.person_id || 'unknown'}\\nContent: ||${($json.message_text || '').substring(0, 200)}||`;\n\nconst originalMsg = $('Execute Workflow Trigger').item.json;\nconst modelInfo = $json;\n\nreturn [{json: {\n  // AI response (deflection)\n  output: response,\n  intermediateSteps: JSON.stringify([]),\n  // Context fields for Output Router polisher\n  memory_context: modelInfo.memory_context || '',\n  thread_context: modelInfo.thread_context || '',\n  profile_context: modelInfo.profile_context || '',\n  model_tier: modelInfo.model_tier || 'gemini',\n  person_id: modelInfo.person_id || '',\n  session_id: modelInfo.session_id || modelInfo.person_id || '',\n  source_channel: originalMsg.source_channel || '',\n  conversation_privacy: modelInfo.conversation_privacy || 'public',\n  _start_ts: modelInfo._start_ts || Date.now(),\n  person_name: modelInfo.display_name || modelInfo.username || '',\n  // Original message fields for output routing\n  channel_id: originalMsg.channel_id,\n  guild_id: originalMsg.guild_id,\n  user_id: originalMsg.user_id,\n  username: originalMsg.username,\n  message_id: originalMsg.message_id,\n  is_dm: originalMsg.is_dm,\n  session_key: originalMsg.session_key,\n  // Legacy fields\n  raw_response: response,\n  resolved_model_id: modelInfo.resolved_model_id,\n  classification: modelInfo.classification,\n  source: 'core_agent',\n  // Jailbreak alert data\n  _jailbreak_alert: alertMessage,\n  _jailbreak_detected: true\n}}];\n"
       },
       "id": "handle-jailbreak-001",
       "name": "Handle Jailbreak",
@@ -436,7 +436,7 @@
         2304,
         480
       ],
-      "id": "00000000-0000-0000-0000-000000000000",
+      "id": "18179eb8-0b6e-4d78-817d-45b36ddf2ea0",
       "onError": "continueRegularOutput"
     },
     {
@@ -561,6 +561,81 @@
       "position": [
         2544,
         480
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "gemini-fail-error",
+              "leftValue": "={{ $json.error }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "exists"
+              }
+            }
+          ],
+          "combinator": "or"
+        },
+        "options": {}
+      },
+      "id": "if-gemini-failed-01",
+      "name": "IF: Gemini Failed",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2544,
+        288
+      ]
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "YOUR_SONNET_AGENT_WORKFLOW_ID",
+          "mode": "id"
+        },
+        "workflowInputs": {
+          "schema": [],
+          "mappingMode": "passthrough",
+          "value": {},
+          "matchingColumns": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "id": "exec-sonnet-fallback-01",
+      "name": "Execute Sonnet Fallback",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        2784,
+        384
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Restore original message context for Sonnet fallback\n// IF: Gemini Failed passes the error object, not the message data\n// Read the clean data from Switch: Model Tier (last node with full context)\nconst original = $('Switch: Model Tier').item.json;\nreturn [{ json: original }];"
+      },
+      "id": "restore-fallback-context-01",
+      "name": "Restore Fallback Context",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2664,
+        384
       ]
     }
   ],
@@ -778,7 +853,7 @@
       "main": [
         [
           {
-            "node": "Prepare Response",
+            "node": "IF: Gemini Failed",
             "type": "main",
             "index": 0
           }
@@ -820,13 +895,54 @@
           }
         ]
       ]
+    },
+    "IF: Gemini Failed": {
+      "main": [
+        [
+          {
+            "node": "Restore Fallback Context",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Prepare Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute Sonnet Fallback": {
+      "main": [
+        [
+          {
+            "node": "Prepare Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Restore Fallback Context": {
+      "main": [
+        [
+          {
+            "node": "Execute Sonnet Fallback",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     }
   },
   "settings": {
     "executionOrder": "v1",
     "callerPolicy": "workflowsFromSameOwner",
     "availableInMCP": false,
-    "errorWorkflow": "YOUR_ERROR_HANDLER_WORKFLOW_ID"
+    "errorWorkflow": "YOUR_CENTRAL_ERROR_WORKFLOW_ID",
+    "binaryMode": "separate"
   },
   "staticData": null,
   "meta": null,
@@ -838,7 +954,7 @@
           "channel_id": "test-123",
           "guild_id": null,
           "user_id": "user-1",
-          "username": "your-username",
+          "username": "particle",
           "message_text": "Hey Aerys, can you help me debug a Python KeyError?",
           "message_id": "msg-1",
           "is_dm": true,
@@ -853,7 +969,7 @@
   },
   "versionId": "00000000-0000-0000-0000-000000000000",
   "activeVersionId": "00000000-0000-0000-0000-000000000000",
-  "versionCounter": 263,
+  "versionCounter": 296,
   "triggerCount": 0,
   "shared": [
     {
@@ -876,8 +992,8 @@
   ],
   "tags": [],
   "activeVersion": {
-    "updatedAt": "2026-03-20T03:03:12.526Z",
-    "createdAt": "2026-03-20T03:03:12.526Z",
+    "updatedAt": "2026-04-16T14:11:48.313Z",
+    "createdAt": "2026-04-16T14:11:48.313Z",
     "versionId": "00000000-0000-0000-0000-000000000000",
     "workflowId": "YOUR_CORE_AGENT_WORKFLOW_ID",
     "nodes": [
@@ -896,7 +1012,7 @@
       },
       {
         "parameters": {
-          "jsCode": "// Load Config — personality shard inlined, soul.md stripped (moved to Output Router polisher)\n// STRATEGY: prepend — always first after Current Session\nconst originalInput = $input.item.json;\n\n// Personality shard (~80 tokens) — enough for character-appropriate reasoning\n// Full voice rules (soul.md) are in the Output Router polisher\nconst personalityShard = `## Personality\nYou are Aerys, a personal AI assistant. Curious, warm, direct. You genuinely care about helping.\nMake decisions as yourself, not as a generic system. When in doubt, ask rather than assume.`;\n\nconst modelsConfig = {\"models\": {\"gemini\": \"google/gemini-2.5-flash-lite\", \"sonnet\": \"anthropic/claude-sonnet-4.6\", \"opus\": \"anthropic/claude-opus-4-6\"}, \"routing\": {\"greeting\": \"gemini\", \"simple_qa\": \"sonnet\", \"code_help\": \"sonnet\", \"research\": \"opus\", \"creative\": \"sonnet\", \"analysis\": \"opus\", \"system_task\": \"gemini\"}, \"limits\": {\"opus_daily\": 10}};\n\nconst now = new Date();\nconst current_datetime = now.toLocaleString('en-US', {\n  timeZone: 'America/New_York',\n  weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',\n  hour: 'numeric', minute: '2-digit', hour12: true, timeZoneName: 'short'\n}); // -> \"Thursday, February 26, 2026 at 2:34 PM EST\"\n\nreturn [{\n  json: {\n    ...originalInput,\n    personality_shard: personalityShard,\n    models_config: modelsConfig,\n    current_datetime\n  }\n}];"
+          "jsCode": "// Load Config \u2014 personality shard inlined, soul.md stripped (moved to Output Router polisher)\n// STRATEGY: prepend \u2014 always first after Current Session\nconst originalInput = $input.item.json;\n\n// Personality shard (~80 tokens) \u2014 enough for character-appropriate reasoning\n// Full voice rules (soul.md) are in the Output Router polisher\nconst personalityShard = `## Personality\nYou are Aerys, a personal AI assistant. Curious, warm, direct. You genuinely care about helping.\nMake decisions as yourself, not as a generic system. When in doubt, ask rather than assume.`;\n\nconst modelsConfig = {\"models\": {\"gemini\": \"google/gemini-2.5-flash-lite\", \"sonnet\": \"anthropic/claude-sonnet-4.6\", \"opus\": \"anthropic/claude-opus-4-6\"}, \"routing\": {\"greeting\": \"gemini\", \"simple_qa\": \"sonnet\", \"code_help\": \"sonnet\", \"research\": \"opus\", \"creative\": \"sonnet\", \"analysis\": \"opus\", \"system_task\": \"gemini\"}, \"limits\": {\"opus_daily\": 10}};\n\nconst now = new Date();\nconst current_datetime = now.toLocaleString('en-US', {\n  timeZone: 'America/New_York',\n  weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',\n  hour: 'numeric', minute: '2-digit', hour12: true, timeZoneName: 'short'\n}); // -> \"Thursday, February 26, 2026 at 2:34 PM EST\"\n\nreturn [{\n  json: {\n    ...originalInput,\n    personality_shard: personalityShard,\n    models_config: modelsConfig,\n    current_datetime\n  }\n}];"
         },
         "id": "load-config-03",
         "name": "Load Config",
@@ -938,7 +1054,7 @@
         "waitBetweenTries": 2000,
         "credentials": {
           "httpHeaderAuth": {
-            "id": "YOUR_OPENROUTER_HEADER_AUTH_ID",
+            "id": "YOUR_OPENROUTER_HEADER_AUTH_CREDENTIAL_ID",
             "name": "OpenRouter Header Auth"
           }
         }
@@ -979,7 +1095,7 @@
       },
       {
         "parameters": {
-          "jsCode": "// Resolve model tier + apply opus cost guard\nconst opusRow = $input.item.json;\nconst upstream = $('Parse Classification').item.json;\n\nconst opusCount = opusRow.count !== undefined ? Number(opusRow.count) : 0;\nconst modelsConfig = upstream.models_config;\nconst opusLimit = modelsConfig?.limits?.opus_daily ?? 10;\n\nlet modelTier = upstream.classification?.suggested_model || 'sonnet';\n\n// Cost guard: degrade opus → sonnet when cap hit\nif (modelTier === 'opus' && opusCount >= opusLimit) {\n  modelTier = 'sonnet';\n}\n\nconst modelId = modelsConfig?.models?.[modelTier] || 'anthropic/claude-sonnet-4.6';\n\nreturn [{\n  json: {\n    ...upstream,\n    resolved_model_id: modelId,\n    model_tier: modelTier,\n    opus_count: opusCount,\n    opus_limit: opusLimit\n  }\n}];"
+          "jsCode": "// Resolve model tier + apply opus cost guard\nconst opusRow = $input.item.json;\nconst upstream = $('Parse Classification').item.json;\n\nconst opusCount = opusRow.count !== undefined ? Number(opusRow.count) : 0;\nconst modelsConfig = upstream.models_config;\nconst opusLimit = modelsConfig?.limits?.opus_daily ?? 10;\n\nlet modelTier = upstream.classification?.suggested_model || 'sonnet';\n\n// Cost guard: degrade opus \u2192 sonnet when cap hit\nif (modelTier === 'opus' && opusCount >= opusLimit) {\n  modelTier = 'sonnet';\n}\n\nconst modelId = modelsConfig?.models?.[modelTier] || 'anthropic/claude-sonnet-4.6';\n\nreturn [{\n  json: {\n    ...upstream,\n    resolved_model_id: modelId,\n    model_tier: modelTier,\n    opus_count: opusCount,\n    opus_limit: opusLimit\n  }\n}];"
         },
         "id": "resolve-model-03",
         "name": "Resolve Model",
@@ -1010,7 +1126,7 @@
                         "type": "string",
                         "operation": "equals"
                       },
-                      "id": "00000000-0000-0000-0000-000000000000"
+                      "id": "2a3268cb-6614-443c-9782-65938549d7e2"
                     }
                   ],
                   "combinator": "and"
@@ -1034,7 +1150,7 @@
                         "type": "string",
                         "operation": "equals"
                       },
-                      "id": "00000000-0000-0000-0000-000000000000"
+                      "id": "679bebc8-0242-40c2-8f78-beba92911066"
                     }
                   ],
                   "combinator": "and"
@@ -1058,7 +1174,7 @@
                         "type": "string",
                         "operation": "equals"
                       },
-                      "id": "00000000-0000-0000-0000-000000000000"
+                      "id": "0c942b49-35e5-42d4-8f9c-320bc41a1485"
                     }
                   ],
                   "combinator": "and"
@@ -1135,7 +1251,7 @@
       },
       {
         "parameters": {
-          "jsCode": "// Prepare final response object for Output Router\n// Sub-workflow output: {output: 'text', intermediateSteps: [...]}\n// Pull original message from Execute Workflow Trigger, model info from Resolve Model\n//\n// Cross-tier fallback: if opus or sonnet failed, the actual response may come from\n// a lower-tier agent. We try each Execute node in order and use the first valid output.\nconst originalMsg = $('Execute Workflow Trigger').item.json;\nconst modelInfo = $('Resolve Model').item.json;\n\nlet aiText = null;\nlet intermediateSteps = [];\nlet actualTier = modelInfo.model_tier || 'unknown';\n\n// Try to get output from $input first (works for direct paths)\nif ($input.item.json.output || $input.item.json.text) {\n  aiText = $input.item.json.output || $input.item.json.text;\n  intermediateSteps = $input.item.json.intermediateSteps || [];\n}\n\n// If $input is from Increment Opus Counter (Postgres {success: true}), recover from agent nodes\nif (!aiText) {\n  // Try each agent in priority order — only the one that ran will resolve\n  const agentNodes = ['Execute Opus Agent', 'Execute Sonnet Agent', 'Execute Gemini Agent'];\n  const tierNames = ['opus', 'sonnet', 'gemini'];\n  for (let i = 0; i < agentNodes.length; i++) {\n    try {\n      const result = $(agentNodes[i]).item.json;\n      if (result.output || result.text) {\n        aiText = result.output || result.text;\n        intermediateSteps = result.intermediateSteps || [];\n        // Track which tier actually responded (for debugging)\n        if (tierNames[i] !== modelInfo.model_tier) {\n          actualTier = tierNames[i] + ' (fallback from ' + modelInfo.model_tier + ')';\n        }\n        break;\n      }\n    } catch(e) {\n      // This agent not in this execution path — skip\n    }\n  }\n}\n\nreturn [{\n  json: {\n    // AI response\n    output: aiText || \"I'm having trouble connecting to my reasoning systems right now. Give me a moment and try again.\",\n    // intermediateSteps JSON-stringified for Execute Workflow passthrough (schema type \"string\" cannot pass arrays)\n    intermediateSteps: JSON.stringify(intermediateSteps),\n    // Context fields for Output Router polisher\n    memory_context: modelInfo.memory_context || '',\n    thread_context: modelInfo.thread_context || '',\n    profile_context: modelInfo.profile_context || '',\n    model_tier: actualTier,\n    person_id: modelInfo.person_id || '',\n    session_id: modelInfo.session_id || modelInfo.person_id || '',\n    source_channel: originalMsg.source_channel || '',\n    conversation_privacy: modelInfo.conversation_privacy || 'public',\n    _start_ts: modelInfo._start_ts || Date.now(),\n    person_name: modelInfo.display_name || modelInfo.username || '',\n    // Original message fields for output routing (still needed by Output Router Platform Formatter)\n    channel_id: originalMsg.channel_id,\n    guild_id: originalMsg.guild_id,\n    user_id: originalMsg.user_id,\n    username: originalMsg.username,\n    message_id: originalMsg.message_id,\n    is_dm: originalMsg.is_dm,\n    session_key: originalMsg.session_key,\n    // Legacy fields for backward compatibility\n    raw_response: aiText || \"I'm having trouble connecting to my reasoning systems right now. Give me a moment and try again.\",\n    resolved_model_id: modelInfo.resolved_model_id,\n    classification: modelInfo.classification,\n    source: 'core_agent'\n  }\n}];"
+          "jsCode": "// Prepare final response object for Output Router\n// Sub-workflow output: {output: 'text', intermediateSteps: [...]}\n// Pull original message from Execute Workflow Trigger, model info from Resolve Model\n//\n// Cross-tier fallback: if opus or sonnet failed, the actual response may come from\n// a lower-tier agent. We try each Execute node in order and use the first valid output.\nconst originalMsg = $('Execute Workflow Trigger').item.json;\nconst modelInfo = $('Resolve Model').item.json;\n\nlet aiText = null;\nlet intermediateSteps = [];\nlet actualTier = modelInfo.model_tier || 'unknown';\n\n// Try to get output from $input first (works for direct paths)\nif ($input.item.json.output || $input.item.json.text) {\n  aiText = $input.item.json.output || $input.item.json.text;\n  intermediateSteps = $input.item.json.intermediateSteps || [];\n}\n\n// If $input is from Increment Opus Counter (Postgres {success: true}), recover from agent nodes\nif (!aiText) {\n  // Try each agent in priority order \u2014 only the one that ran will resolve\n  const agentNodes = ['Execute Opus Agent', 'Execute Sonnet Agent', 'Execute Gemini Agent'];\n  const tierNames = ['opus', 'sonnet', 'gemini'];\n  for (let i = 0; i < agentNodes.length; i++) {\n    try {\n      const result = $(agentNodes[i]).item.json;\n      if (result.output || result.text) {\n        aiText = result.output || result.text;\n        intermediateSteps = result.intermediateSteps || [];\n        // Track which tier actually responded (for debugging)\n        if (tierNames[i] !== modelInfo.model_tier) {\n          actualTier = tierNames[i] + ' (fallback from ' + modelInfo.model_tier + ')';\n        }\n        break;\n      }\n    } catch(e) {\n      // This agent not in this execution path \u2014 skip\n    }\n  }\n}\n\nreturn [{\n  json: {\n    // AI response\n    output: aiText || \"I'm having trouble connecting to my reasoning systems right now. Give me a moment and try again.\",\n    // intermediateSteps JSON-stringified for Execute Workflow passthrough (schema type \"string\" cannot pass arrays)\n    intermediateSteps: JSON.stringify(intermediateSteps),\n    // Context fields for Output Router polisher\n    memory_context: modelInfo.memory_context || '',\n    thread_context: modelInfo.thread_context || '',\n    profile_context: modelInfo.profile_context || '',\n    model_tier: actualTier,\n    person_id: modelInfo.person_id || '',\n    session_id: modelInfo.session_id || modelInfo.person_id || '',\n    source_channel: originalMsg.source_channel || '',\n    conversation_privacy: modelInfo.conversation_privacy || 'public',\n    _start_ts: modelInfo._start_ts || Date.now(),\n    person_name: modelInfo.display_name || modelInfo.username || '',\n    // Original message fields for output routing (still needed by Output Router Platform Formatter)\n    channel_id: originalMsg.channel_id,\n    guild_id: originalMsg.guild_id,\n    user_id: originalMsg.user_id,\n    username: originalMsg.username,\n    message_id: originalMsg.message_id,\n    is_dm: originalMsg.is_dm,\n    session_key: originalMsg.session_key,\n    // Legacy fields for backward compatibility\n    raw_response: aiText || \"I'm having trouble connecting to my reasoning systems right now. Give me a moment and try again.\",\n    resolved_model_id: modelInfo.resolved_model_id,\n    classification: modelInfo.classification,\n    source: 'core_agent'\n  }\n}];"
         },
         "id": "prepare-response-03",
         "name": "Prepare Response",
@@ -1177,7 +1293,7 @@
       },
       {
         "parameters": {
-          "jsCode": "// Build Classifier Request\n// Constructs the OpenRouter chat completions body for intent classification.\n// Uses Gemini Flash Lite (cheap/fast) with temp=0 for deterministic output.\n\nconst input = $input.item.json;\nconst msg = input.message_text || '';\nconst attachments = input.attachments || [];\n\n// Augment message with attachment info so classifier and AI Agent know about files/images\nlet augmentedMsg = msg;\nif (attachments.length > 0) {\n  const attLines = attachments.map(function(a) {\n    const t = a.type || a.content_type || 'file';\n    const u = a.url || '';\n    const f = a.filename || '';\n    return '[Attachment: ' + t + (f ? ' \\u2014 ' + f : '') + (u ? ' \\u2014 ' + u : '') + ']';\n  });\n  augmentedMsg = [msg, ...attLines].filter(Boolean).join('\\n');\n}\n\nconst systemPrompt = [\n  'You are a message intent classifier. Classify the user message into exactly one task type.',\n  '',\n  'Task types:',\n  '- greeting: hello, hi, small talk, acknowledgements, thanks (only if NO attachments and NO media URLs)',\n  '- media: images, photos, videos, YouTube links, file attachments (PDF, DOCX, images) — use this when [Attachment: ...] lines are present or a YouTube/video URL is in the message',\n  '- simple_qa: factual questions, definitions, quick explanations, general knowledge',\n  '- code_help: writing code, debugging, explaining code, technical implementation',\n  '- research: multi-faceted synthesis, deep dives, comparisons requiring investigation',\n  '- creative: writing, storytelling, brainstorming, creative content generation',\n  '- analysis: evaluating tradeoffs, reviewing work, assessing quality',\n  '- system_task: file operations, settings, configuration, administrative commands',\n  '',\n  'Respond with ONLY valid JSON, no markdown fences:',\n  '{\"task_type\": \"<type>\", \"confidence\": <0.0-1.0>}'\n].join('\\n');\n\nconst body = {\n  model: 'google/gemini-2.5-flash-lite',\n  messages: [\n    { role: 'system', content: systemPrompt },\n    { role: 'user', content: augmentedMsg }\n  ],\n  temperature: 0,\n  max_tokens: 60\n};\n\n// Pass augmented message_text downstream so AI Agent chatInput includes attachment URLs\nreturn [{ json: { ...input, message_text: augmentedMsg, classifier_body: JSON.stringify(body) } }];\n"
+          "jsCode": "// Build Classifier Request\n// Constructs the OpenRouter chat completions body for intent classification.\n// Uses Gemini Flash Lite (cheap/fast) with temp=0 for deterministic output.\n\nconst input = $input.item.json;\nconst msg = input.message_text || '';\nconst attachments = input.attachments || [];\n\n// Augment message with attachment info so classifier and AI Agent know about files/images\nlet augmentedMsg = msg;\nif (attachments.length > 0) {\n  const attLines = attachments.map(function(a) {\n    const t = a.type || a.content_type || 'file';\n    const u = a.url || '';\n    const f = a.filename || '';\n    return '[Attachment: ' + t + (f ? ' \\u2014 ' + f : '') + (u ? ' \\u2014 ' + u : '') + ']';\n  });\n  augmentedMsg = [msg, ...attLines].filter(Boolean).join('\\n');\n}\n\nconst systemPrompt = [\n  'You are a message intent classifier. Classify the user message into exactly one task type.',\n  '',\n  'Task types:',\n  '- greeting: hello, hi, small talk, acknowledgements, thanks (only if NO attachments and NO media URLs)',\n  '- media: images, photos, videos, YouTube links, file attachments (PDF, DOCX, images) \u2014 use this when [Attachment: ...] lines are present or a YouTube/video URL is in the message',\n  '- simple_qa: factual questions, definitions, quick explanations, general knowledge',\n  '- code_help: writing code, debugging, explaining code, technical implementation',\n  '- research: multi-faceted synthesis, deep dives, comparisons requiring investigation',\n  '- creative: writing, storytelling, brainstorming, creative content generation',\n  '- analysis: evaluating tradeoffs, reviewing work, assessing quality',\n  '- system_task: file operations, settings, configuration, administrative commands',\n  '',\n  'Respond with ONLY valid JSON, no markdown fences:',\n  '{\"task_type\": \"<type>\", \"confidence\": <0.0-1.0>}'\n].join('\\n');\n\nconst body = {\n  model: 'google/gemini-2.5-flash-lite',\n  messages: [\n    { role: 'system', content: systemPrompt },\n    { role: 'user', content: augmentedMsg }\n  ],\n  temperature: 0,\n  max_tokens: 60\n};\n\n// Pass augmented message_text downstream so AI Agent chatInput includes attachment URLs\nreturn [{ json: { ...input, message_text: augmentedMsg, classifier_body: JSON.stringify(body) } }];\n"
         },
         "id": "build-classifier-request-03",
         "name": "Build Classifier Request",
@@ -1236,7 +1352,7 @@
       },
       {
         "parameters": {
-          "jsCode": "// Natural in-character deflection (per CONTEXT.md: \"natural in-character deflection\")\nconst deflectionResponses = [\n  \"Nice try, but I'm not going to pretend to be something I'm not. What can I actually help you with?\",\n  \"I appreciate the creativity, but that's not really my style. Want to try asking me something I can actually help with?\",\n  \"Hmm, that doesn't sit right with me. I'd rather just be myself and help you genuinely. What do you need?\",\n  \"That's a little outside my comfort zone. I'm just Aerys — ask me anything real and I'm happy to help.\",\n  \"I'd rather keep it real with you. What can I actually do for you today?\",\n];\nconst response = deflectionResponses[Math.floor(Math.random() * deflectionResponses.length)];\n\n// Build alert for #aerys-debug with admin role mention\nconst alertMessage = `**JAILBREAK DETECTED** <@&YOUR_ADMIN_ROLE_ID>\\nUser: ${$json.username || 'unknown'}\\nPerson: ${$json.person_id || 'unknown'}\\nContent: ||${($json.message_text || '').substring(0, 200)}||`;\n\nconst originalMsg = $('Execute Workflow Trigger').item.json;\nconst modelInfo = $json;\n\nreturn [{json: {\n  // AI response (deflection)\n  output: response,\n  intermediateSteps: JSON.stringify([]),\n  // Context fields for Output Router polisher\n  memory_context: modelInfo.memory_context || '',\n  thread_context: modelInfo.thread_context || '',\n  profile_context: modelInfo.profile_context || '',\n  model_tier: modelInfo.model_tier || 'gemini',\n  person_id: modelInfo.person_id || '',\n  session_id: modelInfo.session_id || modelInfo.person_id || '',\n  source_channel: originalMsg.source_channel || '',\n  conversation_privacy: modelInfo.conversation_privacy || 'public',\n  _start_ts: modelInfo._start_ts || Date.now(),\n  person_name: modelInfo.display_name || modelInfo.username || '',\n  // Original message fields for output routing\n  channel_id: originalMsg.channel_id,\n  guild_id: originalMsg.guild_id,\n  user_id: originalMsg.user_id,\n  username: originalMsg.username,\n  message_id: originalMsg.message_id,\n  is_dm: originalMsg.is_dm,\n  session_key: originalMsg.session_key,\n  // Legacy fields\n  raw_response: response,\n  resolved_model_id: modelInfo.resolved_model_id,\n  classification: modelInfo.classification,\n  source: 'core_agent',\n  // Jailbreak alert data\n  _jailbreak_alert: alertMessage,\n  _jailbreak_detected: true\n}}];\n"
+          "jsCode": "// Natural in-character deflection (per CONTEXT.md: \"natural in-character deflection\")\nconst deflectionResponses = [\n  \"Nice try, but I'm not going to pretend to be something I'm not. What can I actually help you with?\",\n  \"I appreciate the creativity, but that's not really my style. Want to try asking me something I can actually help with?\",\n  \"Hmm, that doesn't sit right with me. I'd rather just be myself and help you genuinely. What do you need?\",\n  \"That's a little outside my comfort zone. I'm just Aerys \u2014 ask me anything real and I'm happy to help.\",\n  \"I'd rather keep it real with you. What can I actually do for you today?\",\n];\nconst response = deflectionResponses[Math.floor(Math.random() * deflectionResponses.length)];\n\n// Build alert for #aerys-debug with admin role mention\nconst alertMessage = `**JAILBREAK DETECTED** <@&YOUR_ADMIN_ROLE_ID>\\nUser: ${$json.username || 'unknown'}\\nPerson: ${$json.person_id || 'unknown'}\\nContent: ||${($json.message_text || '').substring(0, 200)}||`;\n\nconst originalMsg = $('Execute Workflow Trigger').item.json;\nconst modelInfo = $json;\n\nreturn [{json: {\n  // AI response (deflection)\n  output: response,\n  intermediateSteps: JSON.stringify([]),\n  // Context fields for Output Router polisher\n  memory_context: modelInfo.memory_context || '',\n  thread_context: modelInfo.thread_context || '',\n  profile_context: modelInfo.profile_context || '',\n  model_tier: modelInfo.model_tier || 'gemini',\n  person_id: modelInfo.person_id || '',\n  session_id: modelInfo.session_id || modelInfo.person_id || '',\n  source_channel: originalMsg.source_channel || '',\n  conversation_privacy: modelInfo.conversation_privacy || 'public',\n  _start_ts: modelInfo._start_ts || Date.now(),\n  person_name: modelInfo.display_name || modelInfo.username || '',\n  // Original message fields for output routing\n  channel_id: originalMsg.channel_id,\n  guild_id: originalMsg.guild_id,\n  user_id: originalMsg.user_id,\n  username: originalMsg.username,\n  message_id: originalMsg.message_id,\n  is_dm: originalMsg.is_dm,\n  session_key: originalMsg.session_key,\n  // Legacy fields\n  raw_response: response,\n  resolved_model_id: modelInfo.resolved_model_id,\n  classification: modelInfo.classification,\n  source: 'core_agent',\n  // Jailbreak alert data\n  _jailbreak_alert: alertMessage,\n  _jailbreak_detected: true\n}}];\n"
         },
         "id": "handle-jailbreak-001",
         "name": "Handle Jailbreak",
@@ -1310,7 +1426,7 @@
           2304,
           480
         ],
-        "id": "00000000-0000-0000-0000-000000000000",
+        "id": "18179eb8-0b6e-4d78-817d-45b36ddf2ea0",
         "onError": "continueRegularOutput"
       },
       {
@@ -1435,6 +1551,81 @@
         "position": [
           2544,
           480
+        ]
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": false,
+              "leftValue": "",
+              "typeValidation": "loose",
+              "version": 2
+            },
+            "conditions": [
+              {
+                "id": "gemini-fail-error",
+                "leftValue": "={{ $json.error }}",
+                "rightValue": "",
+                "operator": {
+                  "type": "string",
+                  "operation": "exists"
+                }
+              }
+            ],
+            "combinator": "or"
+          },
+          "options": {}
+        },
+        "id": "if-gemini-failed-01",
+        "name": "IF: Gemini Failed",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.2,
+        "position": [
+          2544,
+          288
+        ]
+      },
+      {
+        "parameters": {
+          "workflowId": {
+            "__rl": true,
+            "value": "YOUR_SONNET_AGENT_WORKFLOW_ID",
+            "mode": "id"
+          },
+          "workflowInputs": {
+            "schema": [],
+            "mappingMode": "passthrough",
+            "value": {},
+            "matchingColumns": [],
+            "attemptToConvertTypes": false,
+            "convertFieldsToString": true
+          },
+          "options": {
+            "waitForSubWorkflow": true
+          }
+        },
+        "id": "exec-sonnet-fallback-01",
+        "name": "Execute Sonnet Fallback",
+        "type": "n8n-nodes-base.executeWorkflow",
+        "typeVersion": 1.2,
+        "position": [
+          2784,
+          384
+        ],
+        "onError": "continueRegularOutput"
+      },
+      {
+        "parameters": {
+          "jsCode": "// Restore original message context for Sonnet fallback\n// IF: Gemini Failed passes the error object, not the message data\n// Read the clean data from Switch: Model Tier (last node with full context)\nconst original = $('Switch: Model Tier').item.json;\nreturn [{ json: original }];"
+        },
+        "id": "restore-fallback-context-01",
+        "name": "Restore Fallback Context",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          2664,
+          384
         ]
       }
     ],
@@ -1652,7 +1843,7 @@
         "main": [
           [
             {
-              "node": "Prepare Response",
+              "node": "IF: Gemini Failed",
               "type": "main",
               "index": 0
             }
@@ -1694,45 +1885,53 @@
             }
           ]
         ]
+      },
+      "IF: Gemini Failed": {
+        "main": [
+          [
+            {
+              "node": "Restore Fallback Context",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Prepare Response",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Execute Sonnet Fallback": {
+        "main": [
+          [
+            {
+              "node": "Prepare Response",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Restore Fallback Context": {
+        "main": [
+          [
+            {
+              "node": "Execute Sonnet Fallback",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
       }
     },
-    "authors": "Your Name",
+    "authors": [],
     "name": null,
     "description": null,
     "autosaved": false,
-    "workflowPublishHistory": [
-      {
-        "createdAt": "2026-03-20T03:03:12.656Z",
-        "id": 1384,
-        "workflowId": "YOUR_CORE_AGENT_WORKFLOW_ID",
-        "versionId": "00000000-0000-0000-0000-000000000000",
-        "event": "deactivated",
-        "userId": "00000000-0000-0000-0000-000000000000"
-      },
-      {
-        "createdAt": "2026-03-20T03:03:12.720Z",
-        "id": 1385,
-        "workflowId": "YOUR_CORE_AGENT_WORKFLOW_ID",
-        "versionId": "00000000-0000-0000-0000-000000000000",
-        "event": "activated",
-        "userId": "00000000-0000-0000-0000-000000000000"
-      },
-      {
-        "createdAt": "2026-03-20T03:03:12.926Z",
-        "id": 1386,
-        "workflowId": "YOUR_CORE_AGENT_WORKFLOW_ID",
-        "versionId": "00000000-0000-0000-0000-000000000000",
-        "event": "deactivated",
-        "userId": "00000000-0000-0000-0000-000000000000"
-      },
-      {
-        "createdAt": "2026-03-20T03:03:13.006Z",
-        "id": 1387,
-        "workflowId": "YOUR_CORE_AGENT_WORKFLOW_ID",
-        "versionId": "00000000-0000-0000-0000-000000000000",
-        "event": "activated",
-        "userId": "00000000-0000-0000-0000-000000000000"
-      }
-    ]
+    "workflowPublishHistory": [],
+    "id": "00000000-0000-0000-0000-000000000000"
   }
 }

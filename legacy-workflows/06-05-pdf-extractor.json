@@ -1,0 +1,115 @@
+{
+  "id": "06-05-pdf-extractor",
+  "name": "06-05 PDF Extractor",
+  "description": null,
+  "active": false,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "name": "Execute Workflow Trigger",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1,
+      "position": [
+        60,
+        300
+      ],
+      "id": "pdf-trigger-001"
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.url || $json.query }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file"
+            }
+          }
+        }
+      },
+      "name": "Download File",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        280,
+        300
+      ],
+      "id": "pdf-download-001"
+    },
+    {
+      "parameters": {
+        "operation": "pdf",
+        "options": {}
+      },
+      "name": "Extract PDF",
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1,
+      "position": [
+        500,
+        300
+      ],
+      "id": "pdf-extract-001"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Truncate and return PDF text\nlet text = $json.text || $json.data || '';\nif (typeof text !== 'string') text = String(text);\nif (text.length > 8000) {\n  text = text.substring(0, 8000) + '\\n\\n[Content truncated — showing first 8000 characters]';\n}\n\nif (!text || text.trim().length === 0) {\n  return [{json: {\n    result: \"The PDF appears to be empty or contains only images/scanned content that I can't extract text from.\",\n    media_type: 'pdf'\n  }}];\n}\n\nreturn [{json: {\n  result: text,\n  media_type: 'pdf'\n}}];"
+      },
+      "name": "Truncate and Return",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        720,
+        300
+      ],
+      "id": "pdf-truncate-001"
+    }
+  ],
+  "connections": {
+    "Execute Workflow Trigger": {
+      "main": [
+        [
+          {
+            "node": "Download File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download File": {
+      "main": [
+        [
+          {
+            "node": "Extract PDF",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract PDF": {
+      "main": [
+        [
+          {
+            "node": "Truncate and Return",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  },
+  "staticData": null,
+  "activeVersionId": null,
+  "versionCounter": 1,
+  "triggerCount": 0,
+  "tags": [],
+  "activeVersion": null
+}

@@ -1,0 +1,8 @@
+{
+  "notifications": {
+    "discord_notify_channel_id": ""
+  },
+  "_notes": {
+    "discord_notify_channel_id": "Fill with your Discord channel ID if you want Aerys to post system/error notifications there. Leave empty to disable."
+  }
+}

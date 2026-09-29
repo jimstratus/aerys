@@ -1,0 +1,643 @@
+{
+  "updatedAt": "2026-01-01T00:00:00.000Z",
+  "createdAt": "2026-01-01T00:00:00.000Z",
+  "id": "03-01-identity-resolver",
+  "name": "03-01 Identity Resolver",
+  "description": null,
+  "active": true,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "id": "trigger-03-01",
+      "name": "Execute Sub-workflow Trigger",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "DELETE FROM pending_links WHERE expires_at < NOW();",
+        "options": {}
+      },
+      "id": "cleanup-expired-03-01",
+      "name": "Cleanup Expired Codes",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        240,
+        300
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "YOUR_POSTGRES_CREDENTIAL_ID",
+          "name": "Aerys DB (aerys)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT person_id::text, display_name FROM (\n  SELECT pi.person_id::text, p.display_name\n  FROM platform_identities pi\n  JOIN persons p ON p.id = pi.person_id\n  WHERE pi.platform = $1 AND pi.platform_user_id = $2\n  UNION ALL\n  SELECT NULL::text, NULL::text\n) AS result\nLIMIT 1;",
+        "options": {
+          "queryReplacement": "={{ [$('Execute Sub-workflow Trigger').item.json.platform, $('Execute Sub-workflow Trigger').item.json.platform_user_id] }}"
+        }
+      },
+      "id": "lookup-identity-03-01",
+      "name": "Lookup Identity",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        480,
+        300
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "YOUR_POSTGRES_CREDENTIAL_ID",
+          "name": "Aerys DB (aerys)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "check-person-id",
+              "leftValue": "={{ $json.person_id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "check-found-03-01",
+      "name": "Check Found",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        720,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "manual",
+        "duplicateItem": false,
+        "assignments": {
+          "assignments": [
+            {
+              "id": "assign-person-id-existing",
+              "name": "person_id",
+              "value": "={{ $json.person_id }}",
+              "type": "string"
+            },
+            {
+              "id": "assign-display-name-existing",
+              "name": "display_name",
+              "value": "={{ $json.display_name }}",
+              "type": "string"
+            },
+            {
+              "id": "assign-is-new-false",
+              "name": "is_new",
+              "value": false,
+              "type": "boolean"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "return-existing-03-01",
+      "name": "Return Existing",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        960,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO persons (display_name)\nVALUES ($1)\nRETURNING id::text, display_name;",
+        "options": {
+          "queryReplacement": "={{ [$('Execute Sub-workflow Trigger').item.json.username || 'Unknown'] }}"
+        }
+      },
+      "id": "create-person-03-01",
+      "name": "Create Person",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        960,
+        420
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "YOUR_POSTGRES_CREDENTIAL_ID",
+          "name": "Aerys DB (aerys)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO platform_identities (person_id, platform, platform_user_id, username)\nVALUES ($1, $2, $3, $4)\nON CONFLICT (platform, platform_user_id) DO NOTHING\nRETURNING person_id::text;",
+        "options": {
+          "queryReplacement": "={{ [$json.id, $('Execute Sub-workflow Trigger').item.json.platform, $('Execute Sub-workflow Trigger').item.json.platform_user_id, $('Execute Sub-workflow Trigger').item.json.username || 'Unknown'] }}"
+        }
+      },
+      "id": "create-platform-identity-03-01",
+      "name": "Create Platform Identity",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        1200,
+        420
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "YOUR_POSTGRES_CREDENTIAL_ID",
+          "name": "Aerys DB (aerys)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "manual",
+        "duplicateItem": false,
+        "assignments": {
+          "assignments": [
+            {
+              "id": "assign-person-id-new",
+              "name": "person_id",
+              "value": "={{ $('Create Person').item.json.id }}",
+              "type": "string"
+            },
+            {
+              "id": "assign-display-name-new",
+              "name": "display_name",
+              "value": "={{ $('Create Person').item.json.display_name }}",
+              "type": "string"
+            },
+            {
+              "id": "assign-is-new-true",
+              "name": "is_new",
+              "value": true,
+              "type": "boolean"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "return-new-03-01",
+      "name": "Return New",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1440,
+        420
+      ]
+    }
+  ],
+  "connections": {
+    "Execute Sub-workflow Trigger": {
+      "main": [
+        [
+          {
+            "node": "Cleanup Expired Codes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cleanup Expired Codes": {
+      "main": [
+        [
+          {
+            "node": "Lookup Identity",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Lookup Identity": {
+      "main": [
+        [
+          {
+            "node": "Check Found",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Found": {
+      "main": [
+        [
+          {
+            "node": "Return Existing",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Create Person",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Person": {
+      "main": [
+        [
+          {
+            "node": "Create Platform Identity",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Platform Identity": {
+      "main": [
+        [
+          {
+            "node": "Return New",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  },
+  "staticData": null,
+  "meta": null,
+  "pinData": null,
+  "versionId": "00000000-0000-0000-0000-000000000000",
+  "activeVersionId": "00000000-0000-0000-0000-000000000000",
+  "versionCounter": 6,
+  "triggerCount": 0,
+  "shared": [
+    {
+      "updatedAt": "2026-02-21T16:03:05.324Z",
+      "createdAt": "2026-02-21T16:03:05.324Z",
+      "role": "workflow:owner",
+      "workflowId": "YOUR_IDENTITY_RESOLVER_WORKFLOW_ID",
+      "projectId": "YOUR_N8N_PROJECT_ID",
+      "project": {
+        "updatedAt": "2026-01-01T00:00:00.000Z",
+        "createdAt": "2026-01-01T00:00:00.000Z",
+        "id": "YOUR_N8N_PROJECT_ID",
+        "name": "Your Project",
+        "type": "personal",
+        "icon": null,
+        "description": null,
+        "creatorId": "00000000-0000-0000-0000-000000000000"
+      }
+    }
+  ],
+  "tags": [],
+  "activeVersion": {
+    "updatedAt": "2026-02-21T17:06:51.944Z",
+    "createdAt": "2026-02-21T17:06:51.944Z",
+    "versionId": "00000000-0000-0000-0000-000000000000",
+    "workflowId": "YOUR_IDENTITY_RESOLVER_WORKFLOW_ID",
+    "nodes": [
+      {
+        "parameters": {
+          "inputSource": "passthrough"
+        },
+        "id": "trigger-03-01",
+        "name": "Execute Sub-workflow Trigger",
+        "type": "n8n-nodes-base.executeWorkflowTrigger",
+        "typeVersion": 1.1,
+        "position": [
+          0,
+          300
+        ]
+      },
+      {
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "DELETE FROM pending_links WHERE expires_at < NOW();",
+          "options": {}
+        },
+        "id": "cleanup-expired-03-01",
+        "name": "Cleanup Expired Codes",
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.5,
+        "position": [
+          240,
+          300
+        ],
+        "credentials": {
+          "postgres": {
+            "id": "YOUR_POSTGRES_CREDENTIAL_ID",
+            "name": "Aerys DB (aerys)"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "SELECT person_id::text, display_name FROM (\n  SELECT pi.person_id::text, p.display_name\n  FROM platform_identities pi\n  JOIN persons p ON p.id = pi.person_id\n  WHERE pi.platform = $1 AND pi.platform_user_id = $2\n  UNION ALL\n  SELECT NULL::text, NULL::text\n) AS result\nLIMIT 1;",
+          "options": {
+            "queryReplacement": "={{ [$('Execute Sub-workflow Trigger').item.json.platform, $('Execute Sub-workflow Trigger').item.json.platform_user_id] }}"
+          }
+        },
+        "id": "lookup-identity-03-01",
+        "name": "Lookup Identity",
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.5,
+        "position": [
+          480,
+          300
+        ],
+        "credentials": {
+          "postgres": {
+            "id": "YOUR_POSTGRES_CREDENTIAL_ID",
+            "name": "Aerys DB (aerys)"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "strict"
+            },
+            "conditions": [
+              {
+                "id": "check-person-id",
+                "leftValue": "={{ $json.person_id }}",
+                "rightValue": "",
+                "operator": {
+                  "type": "string",
+                  "operation": "notEmpty",
+                  "singleValue": true
+                }
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        },
+        "id": "check-found-03-01",
+        "name": "Check Found",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.2,
+        "position": [
+          720,
+          300
+        ]
+      },
+      {
+        "parameters": {
+          "mode": "manual",
+          "duplicateItem": false,
+          "assignments": {
+            "assignments": [
+              {
+                "id": "assign-person-id-existing",
+                "name": "person_id",
+                "value": "={{ $json.person_id }}",
+                "type": "string"
+              },
+              {
+                "id": "assign-display-name-existing",
+                "name": "display_name",
+                "value": "={{ $json.display_name }}",
+                "type": "string"
+              },
+              {
+                "id": "assign-is-new-false",
+                "name": "is_new",
+                "value": false,
+                "type": "boolean"
+              }
+            ]
+          },
+          "options": {}
+        },
+        "id": "return-existing-03-01",
+        "name": "Return Existing",
+        "type": "n8n-nodes-base.set",
+        "typeVersion": 3.4,
+        "position": [
+          960,
+          200
+        ]
+      },
+      {
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "INSERT INTO persons (display_name)\nVALUES ($1)\nRETURNING id::text, display_name;",
+          "options": {
+            "queryReplacement": "={{ [$('Execute Sub-workflow Trigger').item.json.username || 'Unknown'] }}"
+          }
+        },
+        "id": "create-person-03-01",
+        "name": "Create Person",
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.5,
+        "position": [
+          960,
+          420
+        ],
+        "credentials": {
+          "postgres": {
+            "id": "YOUR_POSTGRES_CREDENTIAL_ID",
+            "name": "Aerys DB (aerys)"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "INSERT INTO platform_identities (person_id, platform, platform_user_id, username)\nVALUES ($1, $2, $3, $4)\nON CONFLICT (platform, platform_user_id) DO NOTHING\nRETURNING person_id::text;",
+          "options": {
+            "queryReplacement": "={{ [$json.id, $('Execute Sub-workflow Trigger').item.json.platform, $('Execute Sub-workflow Trigger').item.json.platform_user_id, $('Execute Sub-workflow Trigger').item.json.username || 'Unknown'] }}"
+          }
+        },
+        "id": "create-platform-identity-03-01",
+        "name": "Create Platform Identity",
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.5,
+        "position": [
+          1200,
+          420
+        ],
+        "credentials": {
+          "postgres": {
+            "id": "YOUR_POSTGRES_CREDENTIAL_ID",
+            "name": "Aerys DB (aerys)"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "mode": "manual",
+          "duplicateItem": false,
+          "assignments": {
+            "assignments": [
+              {
+                "id": "assign-person-id-new",
+                "name": "person_id",
+                "value": "={{ $('Create Person').item.json.id }}",
+                "type": "string"
+              },
+              {
+                "id": "assign-display-name-new",
+                "name": "display_name",
+                "value": "={{ $('Create Person').item.json.display_name }}",
+                "type": "string"
+              },
+              {
+                "id": "assign-is-new-true",
+                "name": "is_new",
+                "value": true,
+                "type": "boolean"
+              }
+            ]
+          },
+          "options": {}
+        },
+        "id": "return-new-03-01",
+        "name": "Return New",
+        "type": "n8n-nodes-base.set",
+        "typeVersion": 3.4,
+        "position": [
+          1440,
+          420
+        ]
+      }
+    ],
+    "connections": {
+      "Execute Sub-workflow Trigger": {
+        "main": [
+          [
+            {
+              "node": "Cleanup Expired Codes",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Cleanup Expired Codes": {
+        "main": [
+          [
+            {
+              "node": "Lookup Identity",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Lookup Identity": {
+        "main": [
+          [
+            {
+              "node": "Check Found",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Check Found": {
+        "main": [
+          [
+            {
+              "node": "Return Existing",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Create Person",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Create Person": {
+        "main": [
+          [
+            {
+              "node": "Create Platform Identity",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Create Platform Identity": {
+        "main": [
+          [
+            {
+              "node": "Return New",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "authors": "Your Name",
+    "name": null,
+    "description": null,
+    "autosaved": false,
+    "workflowPublishHistory": [
+      {
+        "createdAt": "2026-02-21T17:06:52.051Z",
+        "id": 93,
+        "workflowId": "YOUR_IDENTITY_RESOLVER_WORKFLOW_ID",
+        "versionId": "00000000-0000-0000-0000-000000000000",
+        "event": "deactivated",
+        "userId": "00000000-0000-0000-0000-000000000000"
+      },
+      {
+        "createdAt": "2026-02-21T17:06:52.092Z",
+        "id": 94,
+        "workflowId": "YOUR_IDENTITY_RESOLVER_WORKFLOW_ID",
+        "versionId": "00000000-0000-0000-0000-000000000000",
+        "event": "activated",
+        "userId": "00000000-0000-0000-0000-000000000000"
+      }
+    ]
+  }
+}

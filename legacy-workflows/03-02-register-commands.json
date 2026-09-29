@@ -1,0 +1,94 @@
+{
+  "id": "03-02-register-commands",
+  "name": "03-02 Register Aerys Discord Commands",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "manual-trigger-reg-01",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        240,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "https://discord.com/api/v10/applications/YOUR_DISCORD_APPLICATION_ID/guilds/YOUR_DISCORD_GUILD_ID/commands",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "discordBotApi",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": []
+        },
+        "specifyBody": "json",
+        "jsonBody": "[{\"name\": \"link\", \"description\": \"Link your Discord and Telegram accounts (or redeem a code from Telegram)\", \"type\": 1, \"options\": [{\"name\": \"code\", \"description\": \"Verification code from Telegram\", \"type\": 3, \"required\": false}]}, {\"name\": \"unlink\", \"description\": \"Unlink your Discord and Telegram accounts\", \"type\": 1}, {\"name\": \"profile\", \"description\": \"Update your display name\", \"type\": 1, \"options\": [{\"name\": \"name\", \"description\": \"Your new display name\", \"type\": 3, \"required\": true}]}, {\"name\": \"status\", \"description\": \"View your linked accounts and display name\", \"type\": 1}, {\"name\": \"admin-link\", \"description\": \"Force-link a Discord account to a Telegram account (admin only)\", \"type\": 1, \"options\": [{\"name\": \"discord_id\", \"description\": \"Discord user to link\", \"type\": 6, \"required\": true}, {\"name\": \"telegram_id\", \"description\": \"Telegram user ID to link\", \"type\": 3, \"required\": true}]}, {\"name\": \"admin-unlink\", \"description\": \"Force-unlink a platform account from its unified identity (admin only)\", \"type\": 1, \"options\": [{\"name\": \"platform\", \"description\": \"Platform to unlink from\", \"type\": 3, \"required\": true, \"choices\": [{\"name\": \"Discord\", \"value\": \"discord\"}, {\"name\": \"Telegram\", \"value\": \"telegram\"}]}, {\"name\": \"discord_user\", \"description\": \"Discord user to unlink (Discord only)\", \"type\": 6, \"required\": false}, {\"name\": \"id\", \"description\": \"User ID string (Telegram only, or Discord fallback)\", \"type\": 3, \"required\": false}]}, {\"name\": \"aerys-recall\", \"description\": \"See what Aerys remembers about you\", \"type\": 1}, {\"name\": \"aerys-pin\", \"description\": \"Lock a memory so Aerys won't overwrite it\", \"type\": 1, \"options\": [{\"name\": \"fact\", \"description\": \"Search for the memory to lock\", \"type\": 3, \"required\": true}]}, {\"name\": \"aerys-forget\", \"description\": \"Ask Aerys to forget a specific memory\", \"type\": 1, \"options\": [{\"name\": \"fact\", \"description\": \"Search for the memory to forget\", \"type\": 3, \"required\": true}]}, {\"name\": \"aerys-correct\", \"description\": \"Correct a memory Aerys has about you\", \"type\": 1, \"options\": [{\"name\": \"fact\", \"description\": \"Search for the memory to correct\", \"type\": 3, \"required\": true}, {\"name\": \"value\", \"description\": \"The correct value\", \"type\": 3, \"required\": true}]}, {\"name\": \"aerys-tell\", \"description\": \"Tell Aerys something about yourself to remember\", \"type\": 1, \"options\": [{\"name\": \"fact\", \"description\": \"What should Aerys remember?\", \"type\": 3, \"required\": true}]}]",
+        "options": {}
+      },
+      "id": "register-slash-commands-01",
+      "name": "Register Slash Commands",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        460,
+        300
+      ],
+      "credentials": {
+        "discordBotApi": {
+          "id": "YOUR_DISCORD_BOT_CREDENTIAL_ID",
+          "name": "Discord Bot account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Log results\nconst results = $input.all().map(i => i.json);\nconsole.log('Registered commands:', JSON.stringify(results, null, 2));\nconst names = results.map(r => r.name).join(', ');\nreturn [{ json: { registered: names, count: results.length } }];"
+      },
+      "id": "log-results-reg-01",
+      "name": "Log Results",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        680,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "Manual Trigger": {
+      "main": [
+        [
+          {
+            "node": "Register Slash Commands",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Register Slash Commands": {
+      "main": [
+        [
+          {
+            "node": "Log Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log Results": {
+      "main": [
+        []
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  },
+  "staticData": null
+}

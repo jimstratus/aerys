@@ -1,0 +1,1406 @@
+{
+  "updatedAt": "2026-01-01T00:00:00.000Z",
+  "createdAt": "2026-01-01T00:00:00.000Z",
+  "id": "02-04-output-router",
+  "name": "02-04-output-router",
+  "description": null,
+  "active": true,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "id": "execute-workflow-trigger-04",
+      "name": "Execute Workflow Trigger",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -320,
+        304
+      ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.polisher_prompt }}",
+        "options": {
+          "systemMessage": "={{ $json.polisher_system_prompt }}"
+        }
+      },
+      "id": "polisher-ai-agent-04",
+      "name": "Polisher AI Agent",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.7,
+      "position": [
+        160,
+        208
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract polished response from AI Agent output or bypass\n// Handles two paths:\n// 1. Normal: Build Polisher Context -> Polisher AI Agent -> here\n// 2. Bypass: Bypass Polisher -> here (jailbreak, _jailbreak_detected=true)\nconst agentOutput = $input.item.json;\n\nlet ctx;\ntry {\n  ctx = $('Build Polisher Context').item.json;\n} catch (e) {\n  // Bypass path — Build Polisher Context was not executed\n  ctx = agentOutput;\n}\n\nconst polishedText = agentOutput.polished_response || agentOutput.output || agentOutput.text || ctx.output || '';\n\nreturn [{ json: {\n  ...ctx,\n  polished_response: polishedText,\n  output: polishedText,\n  source_channel: ctx.source_channel,\n  model_tier: ctx.model_tier,\n  person_id: ctx.person_id,\n  session_id: ctx.session_id,\n  conversation_privacy: ctx.conversation_privacy,\n  _start_ts: ctx._start_ts,\n  person_name: ctx.person_name,\n  intermediateSteps: ctx.intermediateSteps,\n  _jailbreak_detected: ctx._jailbreak_detected || false\n} }];"
+      },
+      "id": "set-polished-response-04",
+      "name": "Set Polished Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        544,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Platform Formatter\n// IMPORTANT: Read from Set Polished Response, NOT $input — SQL Write-Back wipes all item JSON\nconst ctx = $('Set Polished Response').item.json;\nconst text = ctx.polished_response || ctx.output || ctx.raw_response || ctx.text;\nconst platform = ctx.source_channel;\n\nfunction toTelegramHtml(md) {\n  const parts = [];\n\n  // Extract fenced code blocks — escape HTML entities inside them\n  md = md.replace(/```(\\w+)?\\n?([\\s\\S]*?)```/g, (match, lang, code) => {\n    const esc = code.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\n    parts.push('<pre><code>' + esc + '</code></pre>');\n    return '\\x00' + (parts.length - 1) + '\\x00';\n  });\n\n  // Extract inline code — escape HTML entities inside them\n  md = md.replace(/`([^`]+)`/g, (match, code) => {\n    const esc = code.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\n    parts.push('<code>' + esc + '</code>');\n    return '\\x00' + (parts.length - 1) + '\\x00';\n  });\n\n  // Escape HTML entities in remaining plain text\n  md = md.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\n\n  // Apply bold and italic on plain text\n  md = md.replace(/\\*\\*([^*]+)\\*\\*/g, '<b>$1</b>');\n  md = md.replace(/(?<!\\*)\\*([^*]+)\\*(?!\\*)/g, '<i>$1</i>');\n\n  // Restore code blocks\n  md = md.replace(/\\x00(\\d+)\\x00/g, (match, idx) => parts[parseInt(idx)]);\n\n  return md;\n}\n\nlet formatted;\nlet parseMode;\n\nif (platform === 'telegram') {\n  formatted = toTelegramHtml(text);\n  parseMode = 'HTML';\n} else {\n  formatted = text;\n  parseMode = undefined;\n}\n\n// Spread ctx (not $input) to preserve source_channel, channel_id, etc.\nreturn [{ json: { ...ctx, formatted_response: formatted, parse_mode: parseMode } }];"
+      },
+      "id": "platform-formatter-04",
+      "name": "Platform Formatter",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1264,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Message Splitter\n// Splits long responses at natural boundaries before sending.\n// Discord limit: 2000 chars. Telegram limit: 4096 chars.\n// Split priority: paragraph break > single newline > sentence end > hard cut.\n\nconst text = $input.item.json.formatted_response || '';\nconst platform = $input.item.json.source_channel;\nconst limit = platform === 'discord' ? 2000 : 4096;\n\nfunction splitMessage(text, limit) {\n  if (text.length <= limit) return [text];\n  const chunks = [];\n  let remaining = text;\n  while (remaining.length > limit) {\n    let splitAt = remaining.lastIndexOf('\\n\\n', limit);\n    if (splitAt < limit * 0.5) splitAt = remaining.lastIndexOf('\\n', limit);\n    if (splitAt < limit * 0.5) splitAt = remaining.lastIndexOf('. ', limit);\n    if (splitAt < 0 || splitAt < limit * 0.3) splitAt = limit;\n    chunks.push(remaining.slice(0, splitAt).trim());\n    remaining = remaining.slice(splitAt).trim();\n  }\n  if (remaining) chunks.push(remaining);\n  return chunks;\n}\n\nconst chunks = splitMessage(text, limit);\nreturn chunks.map((chunk, i) => ({\n  json: {\n    ...$input.item.json,\n    chunk,\n    chunk_index: i,\n    total_chunks: chunks.length\n  }\n}));"
+      },
+      "id": "message-splitter-04",
+      "name": "Message Splitter",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1504,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.source_channel }}",
+                    "rightValue": "discord",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "00000000-0000-0000-0000-000000000000"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "discord"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.source_channel }}",
+                    "rightValue": "telegram",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "00000000-0000-0000-0000-000000000000"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "telegram"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "switch-platform-04",
+      "name": "Switch: Route by Platform",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        1744,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Build Discord message body — always plain content\nconst input = $input.item.json;\nconst body = { content: input.chunk };\nreturn [{ json: { ...input, discord_body: JSON.stringify(body) } }];"
+      },
+      "id": "build-discord-body-04",
+      "name": "Build Discord Body",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1984,
+        80
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://discord.com/api/v10/channels/{{$json.channel_id}}/messages",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "discordBotApi",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ $json.discord_body }}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "send-discord-04",
+      "name": "Send Discord Message",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2224,
+        80
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "credentials": {
+        "discordBotApi": {
+          "id": "YOUR_DISCORD_BOT_CREDENTIAL_ID",
+          "name": "Discord Bot account"
+        }
+      },
+      "notes": "Sends response to Discord channel. Uses predefined discordBotApi credential for Authorization: Bot <token> header. Body is pre-serialized JSON from Build Discord Body node."
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $json.channel_id }}",
+        "text": "={{ $json.chunk }}",
+        "additionalFields": {
+          "appendAttribution": false,
+          "disable_web_page_preview": true,
+          "parse_mode": "={{ $json.parse_mode || 'HTML' }}"
+        }
+      },
+      "id": "send-telegram-04",
+      "name": "Send Telegram Message",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1984,
+        320
+      ],
+      "webhookId": "00000000-0000-0000-0000-000000000000",
+      "credentials": {
+        "telegramApi": {
+          "id": "YOUR_TELEGRAM_CREDENTIAL_ID",
+          "name": "Telegram account"
+        }
+      },
+      "notes": "Sends response to Telegram chat. parse_mode=HTML (from Platform Formatter). disable_web_page_preview avoids unfurling URLs in AI responses."
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "loop-over-chunks-04",
+      "name": "Loop Over Chunks",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        1632,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Build Polisher Context — assemble polisher input with soul.md and full context\n// STRATEGY: replace — entire polisher context rebuilt from inputs on every message\nconst fs = require('fs');\n// STRATEGY: replace — soul.md read from disk at runtime, updated by Reflection/ToneCraft\nconst soulMd = fs.readFileSync('/home/node/aerys-config/soul.md', 'utf8');\nconst intermediateSteps = JSON.parse($json.intermediateSteps || '[]');\n\n// STRATEGY: skip_if_empty — only included when tools were called\n// Format tool return data for polisher awareness\nlet toolContext = '';\nif (intermediateSteps.length > 0) {\n  toolContext = '## Tool Results\\n' + intermediateSteps.map(step => {\n    const obs = typeof step.observation === 'string'\n      ? step.observation.substring(0, 2000)\n      : JSON.stringify(step.observation).substring(0, 2000);\n    return `[${step.action?.tool || 'unknown'}]: ${obs}`;\n  }).join('\\n\\n');\n}\n\n// System message: identity + context (no rules)\nconst systemPrompt = [\n  // STRATEGY: replace — soul.md personality, updated at runtime by editing file\n  `## Background\\n${soulMd}`,\n  toolContext,\n  // STRATEGY: replace — forwarded from adapter, rebuilt each message\n  $json.memory_context ? `## Relevant Memories\\n${$json.memory_context}` : '',\n  $json.thread_context ? `## Recent Conversation\\n${$json.thread_context}` : '',\n  // STRATEGY: replace — forwarded from adapter, rebuilt each message\n  $json.profile_context ? `## Person Profile\\n${$json.profile_context}` : '',\n].filter(Boolean).join('\\n\\n');\n\n// Prompt: instruction + core agent output + rules\nconst privacyRule = $json.conversation_privacy === 'public'\n  ? '- PUBLIC CHANNEL: Scrub specific PII from your output (phone numbers, addresses, SSNs, medical details). Generalize sensitive facts. Names and general preferences are fine.'\n  : '- PRIVATE DM: No PII restrictions. Share all information freely.';\n\nconst polisherPrompt = `Rewrite the following Core Agent response in your voice — Aerys's voice as defined in your Background. Preserve all factual content and tool results.\n\n## Core Agent Response\n${$json.output}\n\n## Rules\n- Rewrite in YOUR voice. You are Aerys. The Core Agent response is raw material -- make it sound like you.\n- PRESERVE all source URLs, citations, and links from tool results. If the Core Agent cited sources, those sources MUST appear in your rewrite. Do not drop URLs.\n- If the response references tool results, incorporate them naturally but keep the factual content and sources intact.\n${privacyRule}\n- Never use em dashes. Use double hyphens (--), commas, or restructure the sentence instead.\n- Do NOT add preambles like \"Here's my rewrite.\" Just output the polished response directly.\n- Keep the response length similar to the Core Agent's. Do not pad or over-explain.`;\n\nreturn [{json: {\n  ...$json,\n  polisher_system_prompt: systemPrompt,\n  polisher_prompt: polisherPrompt,\n  intermediateSteps\n}}];"
+      },
+      "id": "build-polisher-context-04",
+      "name": "Build Polisher Context",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -96,
+        304
+      ]
+    },
+    {
+      "parameters": {
+        "model": "anthropic/claude-haiku-4.5",
+        "options": {}
+      },
+      "id": "openrouter-sonnet-polisher-04",
+      "name": "OpenRouter Haiku (Polisher)",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
+      "typeVersion": 1,
+      "position": [
+        208,
+        480
+      ],
+      "credentials": {
+        "openRouterApi": {
+          "id": "YOUR_OPENROUTER_CREDENTIAL_ID",
+          "name": "OpenRouter (Aerys)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// SQL write-back: update n8n_chat_histories with polished response\n// so stored conversation matches what user actually saw\nconst polishedResponse = $json.polished_response || $json.output;\nconst sessionId = $json.session_id || $json.person_id;\nreturn [{json: {\n  ...$json,\n  wb_polished_content: polishedResponse,\n  wb_session_id: sessionId\n}}];"
+      },
+      "id": "prepare-writeback-04",
+      "name": "Prepare Write-Back",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        784,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE n8n_chat_histories\nSET message = jsonb_set(message, '{content}', to_jsonb($1::text))\nWHERE id = (\n  SELECT id FROM n8n_chat_histories\n  WHERE session_id = $2\n    AND (message->>'type') = 'ai'\n  ORDER BY id DESC LIMIT 1\n)",
+        "options": {
+          "queryReplacement": "={{ [$json.wb_polished_content, $json.wb_session_id] }}"
+        }
+      },
+      "id": "sql-writeback-04",
+      "name": "SQL Write-Back",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        1024,
+        192
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "YOUR_POSTGRES_CREDENTIAL_ID",
+          "name": "Aerys DB (aerys)"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Hardcoded — n8n Variables are Enterprise-only on this instance\nconst DEBUG_ENABLED = true; // flip to false to disable traces\nreturn [{json: {...$json, _debug_enabled: DEBUG_ENABLED}}];"
+      },
+      "id": "check-debug-enabled-06",
+      "name": "Check Debug Enabled",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        544,
+        480
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "debug-check-01",
+              "leftValue": "={{ $json._debug_enabled }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-debug-enabled-06",
+      "name": "IF: Debug Enabled",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        784,
+        480
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Crabwalk-style trace — NO user content, NO Aerys response text (privacy)\nconst steps = $json.intermediateSteps || [];\nconst model = ($json.model_tier || 'unknown').charAt(0).toUpperCase() + ($json.model_tier || 'unknown').slice(1);\nconst startTs = $json._start_ts || Date.now();\nconst elapsed = ((Date.now() - startTs) / 1000).toFixed(1);\n\nconst TOOL_PATTERNS = [\n  { pattern: /media/i, icon: '[IMG]', label: 'media' },\n  { pattern: /research/i, icon: '[RES]', label: 'research' },\n  { pattern: /email/i, icon: '[EML]', label: 'email' },\n];\n\nfunction matchTool(toolName) {\n  if (!toolName) return { icon: '[?]', label: 'unknown' };\n  const match = TOOL_PATTERNS.find(p => p.pattern.test(toolName));\n  return match || { icon: '[?]', label: toolName };\n}\n\nlet lines = [`[${model}] ${elapsed}s`];\n\nif (steps.length === 0) {\n  lines.push('+-- Direct response');\n} else {\n  let totalTokens = 0;\n  steps.forEach((step, i) => {\n    const isLast = i === steps.length - 1;\n    const prefix = isLast ? '+--' : '|--';\n    const tool = matchTool(step.action?.tool);\n    const tokens = step.tokenUsage?.totalTokens || 0;\n    totalTokens += tokens;\n    const tokenStr = tokens > 0 ? ` ${tokens} tokens` : '';\n    lines.push(`${prefix} ${tool.icon} ${tool.label}${tokenStr}`);\n  });\n  if (totalTokens > 0) {\n    lines.push(`+-- Total: ${totalTokens.toLocaleString()} tokens`);\n  }\n}\n\nreturn [{json: {\n  trace_message: '```\\n' + lines.join('\\n') + '\\n```',\n  debug_channel_id: 'YOUR_DEBUG_CHANNEL_ID'\n}}];"
+      },
+      "id": "format-trace-06",
+      "name": "Format Trace",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1024,
+        480
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://discord.com/api/v10/channels/{{ $json.debug_channel_id }}/messages",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "discordBotApi",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({content: $json.trace_message}) }}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "send-trace-06",
+      "name": "Send Trace",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1264,
+        480
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 1000,
+      "credentials": {
+        "discordBotApi": {
+          "id": "YOUR_DISCORD_BOT_CREDENTIAL_ID",
+          "name": "Discord Bot account"
+        }
+      },
+      "continueOnFail": true,
+      "notes": "Sends debug trace to #aerys-debug. continueOnFail=true so trace failure never blocks user response. retryOnFail for DNS transient failures on Tachyon."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": ""
+          },
+          "conditions": [
+            {
+              "id": "skip-polisher-check",
+              "leftValue": "={{ $json._jailbreak_detected }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "skip-polisher-if",
+      "name": "IF: Skip Polisher",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -144,
+        48
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Bypass polisher — jailbreak deflections are already in-character\n// Pass output through as polished_response unchanged\nreturn [{json: {\n  ...$json,\n  polished_response: $json.output,\n  intermediateSteps: JSON.parse($json.intermediateSteps || '[]')\n}}];"
+      },
+      "id": "bypass-polisher-code",
+      "name": "Bypass Polisher",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        128,
+        -64
+      ]
+    }
+  ],
+  "connections": {
+    "Execute Workflow Trigger": {
+      "main": [
+        [
+          {
+            "node": "IF: Skip Polisher",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Polisher Context": {
+      "main": [
+        [
+          {
+            "node": "Polisher AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Polisher AI Agent": {
+      "main": [
+        [
+          {
+            "node": "Set Polished Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set Polished Response": {
+      "main": [
+        [
+          {
+            "node": "Prepare Write-Back",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Write-Back": {
+      "main": [
+        [
+          {
+            "node": "SQL Write-Back",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "SQL Write-Back": {
+      "main": [
+        [
+          {
+            "node": "Platform Formatter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Platform Formatter": {
+      "main": [
+        [
+          {
+            "node": "Message Splitter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Message Splitter": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Chunks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Over Chunks": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Switch: Route by Platform",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch: Route by Platform": {
+      "main": [
+        [
+          {
+            "node": "Build Discord Body",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send Telegram Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Discord Body": {
+      "main": [
+        [
+          {
+            "node": "Send Discord Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Discord Message": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Chunks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Telegram Message": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Chunks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenRouter Haiku (Polisher)": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Polisher AI Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Debug Enabled": {
+      "main": [
+        [
+          {
+            "node": "IF: Debug Enabled",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF: Debug Enabled": {
+      "main": [
+        [
+          {
+            "node": "Format Trace",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Format Trace": {
+      "main": [
+        [
+          {
+            "node": "Send Trace",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF: Skip Polisher": {
+      "main": [
+        [
+          {
+            "node": "Bypass Polisher",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Polisher Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Bypass Polisher": {
+      "main": [
+        [
+          {
+            "node": "Set Polished Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false,
+    "errorWorkflow": "YOUR_ERROR_HANDLER_WORKFLOW_ID"
+  },
+  "staticData": null,
+  "meta": null,
+  "pinData": {},
+  "versionId": "00000000-0000-0000-0000-000000000000",
+  "activeVersionId": "00000000-0000-0000-0000-000000000000",
+  "versionCounter": 107,
+  "triggerCount": 0,
+  "shared": [
+    {
+      "updatedAt": "2026-02-20T02:20:18.200Z",
+      "createdAt": "2026-02-20T02:20:18.200Z",
+      "role": "workflow:owner",
+      "workflowId": "YOUR_OUTPUT_ROUTER_WORKFLOW_ID",
+      "projectId": "YOUR_N8N_PROJECT_ID",
+      "project": {
+        "updatedAt": "2026-01-01T00:00:00.000Z",
+        "createdAt": "2026-01-01T00:00:00.000Z",
+        "id": "YOUR_N8N_PROJECT_ID",
+        "name": "Your Project",
+        "type": "personal",
+        "icon": null,
+        "description": null,
+        "creatorId": "00000000-0000-0000-0000-000000000000"
+      }
+    }
+  ],
+  "tags": [],
+  "activeVersion": {
+    "updatedAt": "2026-03-22T02:03:03.987Z",
+    "createdAt": "2026-03-22T02:03:03.987Z",
+    "versionId": "00000000-0000-0000-0000-000000000000",
+    "workflowId": "YOUR_OUTPUT_ROUTER_WORKFLOW_ID",
+    "nodes": [
+      {
+        "parameters": {
+          "inputSource": "passthrough"
+        },
+        "id": "execute-workflow-trigger-04",
+        "name": "Execute Workflow Trigger",
+        "type": "n8n-nodes-base.executeWorkflowTrigger",
+        "typeVersion": 1.1,
+        "position": [
+          -320,
+          304
+        ]
+      },
+      {
+        "parameters": {
+          "promptType": "define",
+          "text": "={{ $json.polisher_prompt }}",
+          "options": {
+            "systemMessage": "={{ $json.polisher_system_prompt }}"
+          }
+        },
+        "id": "polisher-ai-agent-04",
+        "name": "Polisher AI Agent",
+        "type": "@n8n/n8n-nodes-langchain.agent",
+        "typeVersion": 1.7,
+        "position": [
+          160,
+          208
+        ],
+        "onError": "continueRegularOutput"
+      },
+      {
+        "parameters": {
+          "jsCode": "// Extract polished response from AI Agent output or bypass\n// Handles two paths:\n// 1. Normal: Build Polisher Context -> Polisher AI Agent -> here\n// 2. Bypass: Bypass Polisher -> here (jailbreak, _jailbreak_detected=true)\nconst agentOutput = $input.item.json;\n\nlet ctx;\ntry {\n  ctx = $('Build Polisher Context').item.json;\n} catch (e) {\n  // Bypass path — Build Polisher Context was not executed\n  ctx = agentOutput;\n}\n\nconst polishedText = agentOutput.polished_response || agentOutput.output || agentOutput.text || ctx.output || '';\n\nreturn [{ json: {\n  ...ctx,\n  polished_response: polishedText,\n  output: polishedText,\n  source_channel: ctx.source_channel,\n  model_tier: ctx.model_tier,\n  person_id: ctx.person_id,\n  session_id: ctx.session_id,\n  conversation_privacy: ctx.conversation_privacy,\n  _start_ts: ctx._start_ts,\n  person_name: ctx.person_name,\n  intermediateSteps: ctx.intermediateSteps,\n  _jailbreak_detected: ctx._jailbreak_detected || false\n} }];"
+        },
+        "id": "set-polished-response-04",
+        "name": "Set Polished Response",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          544,
+          192
+        ]
+      },
+      {
+        "parameters": {
+          "jsCode": "// Platform Formatter\n// IMPORTANT: Read from Set Polished Response, NOT $input — SQL Write-Back wipes all item JSON\nconst ctx = $('Set Polished Response').item.json;\nconst text = ctx.polished_response || ctx.output || ctx.raw_response || ctx.text;\nconst platform = ctx.source_channel;\n\nfunction toTelegramHtml(md) {\n  const parts = [];\n\n  // Extract fenced code blocks — escape HTML entities inside them\n  md = md.replace(/```(\\w+)?\\n?([\\s\\S]*?)```/g, (match, lang, code) => {\n    const esc = code.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\n    parts.push('<pre><code>' + esc + '</code></pre>');\n    return '\\x00' + (parts.length - 1) + '\\x00';\n  });\n\n  // Extract inline code — escape HTML entities inside them\n  md = md.replace(/`([^`]+)`/g, (match, code) => {\n    const esc = code.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\n    parts.push('<code>' + esc + '</code>');\n    return '\\x00' + (parts.length - 1) + '\\x00';\n  });\n\n  // Escape HTML entities in remaining plain text\n  md = md.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\n\n  // Apply bold and italic on plain text\n  md = md.replace(/\\*\\*([^*]+)\\*\\*/g, '<b>$1</b>');\n  md = md.replace(/(?<!\\*)\\*([^*]+)\\*(?!\\*)/g, '<i>$1</i>');\n\n  // Restore code blocks\n  md = md.replace(/\\x00(\\d+)\\x00/g, (match, idx) => parts[parseInt(idx)]);\n\n  return md;\n}\n\nlet formatted;\nlet parseMode;\n\nif (platform === 'telegram') {\n  formatted = toTelegramHtml(text);\n  parseMode = 'HTML';\n} else {\n  formatted = text;\n  parseMode = undefined;\n}\n\n// Spread ctx (not $input) to preserve source_channel, channel_id, etc.\nreturn [{ json: { ...ctx, formatted_response: formatted, parse_mode: parseMode } }];"
+        },
+        "id": "platform-formatter-04",
+        "name": "Platform Formatter",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1264,
+          192
+        ]
+      },
+      {
+        "parameters": {
+          "jsCode": "// Message Splitter\n// Splits long responses at natural boundaries before sending.\n// Discord limit: 2000 chars. Telegram limit: 4096 chars.\n// Split priority: paragraph break > single newline > sentence end > hard cut.\n\nconst text = $input.item.json.formatted_response || '';\nconst platform = $input.item.json.source_channel;\nconst limit = platform === 'discord' ? 2000 : 4096;\n\nfunction splitMessage(text, limit) {\n  if (text.length <= limit) return [text];\n  const chunks = [];\n  let remaining = text;\n  while (remaining.length > limit) {\n    let splitAt = remaining.lastIndexOf('\\n\\n', limit);\n    if (splitAt < limit * 0.5) splitAt = remaining.lastIndexOf('\\n', limit);\n    if (splitAt < limit * 0.5) splitAt = remaining.lastIndexOf('. ', limit);\n    if (splitAt < 0 || splitAt < limit * 0.3) splitAt = limit;\n    chunks.push(remaining.slice(0, splitAt).trim());\n    remaining = remaining.slice(splitAt).trim();\n  }\n  if (remaining) chunks.push(remaining);\n  return chunks;\n}\n\nconst chunks = splitMessage(text, limit);\nreturn chunks.map((chunk, i) => ({\n  json: {\n    ...$input.item.json,\n    chunk,\n    chunk_index: i,\n    total_chunks: chunks.length\n  }\n}));"
+        },
+        "id": "message-splitter-04",
+        "name": "Message Splitter",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1504,
+          192
+        ]
+      },
+      {
+        "parameters": {
+          "rules": {
+            "values": [
+              {
+                "conditions": {
+                  "options": {
+                    "caseSensitive": true,
+                    "leftValue": "",
+                    "typeValidation": "strict",
+                    "version": 2
+                  },
+                  "conditions": [
+                    {
+                      "leftValue": "={{ $json.source_channel }}",
+                      "rightValue": "discord",
+                      "operator": {
+                        "type": "string",
+                        "operation": "equals"
+                      },
+                      "id": "00000000-0000-0000-0000-000000000000"
+                    }
+                  ],
+                  "combinator": "and"
+                },
+                "renameOutput": true,
+                "outputKey": "discord"
+              },
+              {
+                "conditions": {
+                  "options": {
+                    "caseSensitive": true,
+                    "leftValue": "",
+                    "typeValidation": "strict",
+                    "version": 2
+                  },
+                  "conditions": [
+                    {
+                      "leftValue": "={{ $json.source_channel }}",
+                      "rightValue": "telegram",
+                      "operator": {
+                        "type": "string",
+                        "operation": "equals"
+                      },
+                      "id": "00000000-0000-0000-0000-000000000000"
+                    }
+                  ],
+                  "combinator": "and"
+                },
+                "renameOutput": true,
+                "outputKey": "telegram"
+              }
+            ]
+          },
+          "options": {}
+        },
+        "id": "switch-platform-04",
+        "name": "Switch: Route by Platform",
+        "type": "n8n-nodes-base.switch",
+        "typeVersion": 3.2,
+        "position": [
+          1744,
+          192
+        ]
+      },
+      {
+        "parameters": {
+          "jsCode": "// Build Discord message body — always plain content\nconst input = $input.item.json;\nconst body = { content: input.chunk };\nreturn [{ json: { ...input, discord_body: JSON.stringify(body) } }];"
+        },
+        "id": "build-discord-body-04",
+        "name": "Build Discord Body",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1984,
+          80
+        ]
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "=https://discord.com/api/v10/channels/{{$json.channel_id}}/messages",
+          "authentication": "predefinedCredentialType",
+          "nodeCredentialType": "discordBotApi",
+          "sendBody": true,
+          "contentType": "raw",
+          "rawContentType": "application/json",
+          "body": "={{ $json.discord_body }}",
+          "options": {
+            "response": {
+              "response": {
+                "neverError": true
+              }
+            }
+          }
+        },
+        "id": "send-discord-04",
+        "name": "Send Discord Message",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          2224,
+          80
+        ],
+        "retryOnFail": true,
+        "maxTries": 3,
+        "waitBetweenTries": 2000,
+        "credentials": {
+          "discordBotApi": {
+            "id": "YOUR_DISCORD_BOT_CREDENTIAL_ID",
+            "name": "Discord Bot account"
+          }
+        },
+        "notes": "Sends response to Discord channel. Uses predefined discordBotApi credential for Authorization: Bot <token> header. Body is pre-serialized JSON from Build Discord Body node."
+      },
+      {
+        "parameters": {
+          "chatId": "={{ $json.channel_id }}",
+          "text": "={{ $json.chunk }}",
+          "additionalFields": {
+            "appendAttribution": false,
+            "disable_web_page_preview": true,
+            "parse_mode": "={{ $json.parse_mode || 'HTML' }}"
+          }
+        },
+        "id": "send-telegram-04",
+        "name": "Send Telegram Message",
+        "type": "n8n-nodes-base.telegram",
+        "typeVersion": 1.2,
+        "position": [
+          1984,
+          320
+        ],
+        "webhookId": "00000000-0000-0000-0000-000000000000",
+        "credentials": {
+          "telegramApi": {
+            "id": "YOUR_TELEGRAM_CREDENTIAL_ID",
+            "name": "Telegram account"
+          }
+        },
+        "notes": "Sends response to Telegram chat. parse_mode=HTML (from Platform Formatter). disable_web_page_preview avoids unfurling URLs in AI responses."
+      },
+      {
+        "parameters": {
+          "options": {}
+        },
+        "id": "loop-over-chunks-04",
+        "name": "Loop Over Chunks",
+        "type": "n8n-nodes-base.splitInBatches",
+        "typeVersion": 3,
+        "position": [
+          1632,
+          192
+        ]
+      },
+      {
+        "parameters": {
+          "jsCode": "// Build Polisher Context — assemble polisher input with soul.md and full context\n// STRATEGY: replace — entire polisher context rebuilt from inputs on every message\nconst fs = require('fs');\n// STRATEGY: replace — soul.md read from disk at runtime, updated by Reflection/ToneCraft\nconst soulMd = fs.readFileSync('/home/node/aerys-config/soul.md', 'utf8');\nconst intermediateSteps = JSON.parse($json.intermediateSteps || '[]');\n\n// STRATEGY: skip_if_empty — only included when tools were called\n// Format tool return data for polisher awareness\nlet toolContext = '';\nif (intermediateSteps.length > 0) {\n  toolContext = '## Tool Results\\n' + intermediateSteps.map(step => {\n    const obs = typeof step.observation === 'string'\n      ? step.observation.substring(0, 2000)\n      : JSON.stringify(step.observation).substring(0, 2000);\n    return `[${step.action?.tool || 'unknown'}]: ${obs}`;\n  }).join('\\n\\n');\n}\n\n// System message: identity + context (no rules)\nconst systemPrompt = [\n  // STRATEGY: replace — soul.md personality, updated at runtime by editing file\n  `## Background\\n${soulMd}`,\n  toolContext,\n  // STRATEGY: replace — forwarded from adapter, rebuilt each message\n  $json.memory_context ? `## Relevant Memories\\n${$json.memory_context}` : '',\n  $json.thread_context ? `## Recent Conversation\\n${$json.thread_context}` : '',\n  // STRATEGY: replace — forwarded from adapter, rebuilt each message\n  $json.profile_context ? `## Person Profile\\n${$json.profile_context}` : '',\n].filter(Boolean).join('\\n\\n');\n\n// Prompt: instruction + core agent output + rules\nconst privacyRule = $json.conversation_privacy === 'public'\n  ? '- PUBLIC CHANNEL: Scrub specific PII from your output (phone numbers, addresses, SSNs, medical details). Generalize sensitive facts. Names and general preferences are fine.'\n  : '- PRIVATE DM: No PII restrictions. Share all information freely.';\n\nconst polisherPrompt = `Rewrite the following Core Agent response in your voice — Aerys's voice as defined in your Background. Preserve all factual content and tool results.\n\n## Core Agent Response\n${$json.output}\n\n## Rules\n- Rewrite in YOUR voice. You are Aerys. The Core Agent response is raw material -- make it sound like you.\n- PRESERVE all source URLs, citations, and links from tool results. If the Core Agent cited sources, those sources MUST appear in your rewrite. Do not drop URLs.\n- If the response references tool results, incorporate them naturally but keep the factual content and sources intact.\n${privacyRule}\n- Never use em dashes. Use double hyphens (--), commas, or restructure the sentence instead.\n- Do NOT add preambles like \"Here's my rewrite.\" Just output the polished response directly.\n- Keep the response length similar to the Core Agent's. Do not pad or over-explain.`;\n\nreturn [{json: {\n  ...$json,\n  polisher_system_prompt: systemPrompt,\n  polisher_prompt: polisherPrompt,\n  intermediateSteps\n}}];"
+        },
+        "id": "build-polisher-context-04",
+        "name": "Build Polisher Context",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          -96,
+          304
+        ]
+      },
+      {
+        "parameters": {
+          "model": "anthropic/claude-haiku-4.5",
+          "options": {}
+        },
+        "id": "openrouter-sonnet-polisher-04",
+        "name": "OpenRouter Haiku (Polisher)",
+        "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
+        "typeVersion": 1,
+        "position": [
+          208,
+          480
+        ],
+        "credentials": {
+          "openRouterApi": {
+            "id": "YOUR_OPENROUTER_CREDENTIAL_ID",
+            "name": "OpenRouter (Aerys)"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "jsCode": "// SQL write-back: update n8n_chat_histories with polished response\n// so stored conversation matches what user actually saw\nconst polishedResponse = $json.polished_response || $json.output;\nconst sessionId = $json.session_id || $json.person_id;\nreturn [{json: {\n  ...$json,\n  wb_polished_content: polishedResponse,\n  wb_session_id: sessionId\n}}];"
+        },
+        "id": "prepare-writeback-04",
+        "name": "Prepare Write-Back",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          784,
+          192
+        ]
+      },
+      {
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "UPDATE n8n_chat_histories\nSET message = jsonb_set(message, '{content}', to_jsonb($1::text))\nWHERE id = (\n  SELECT id FROM n8n_chat_histories\n  WHERE session_id = $2\n    AND (message->>'type') = 'ai'\n  ORDER BY id DESC LIMIT 1\n)",
+          "options": {
+            "queryReplacement": "={{ [$json.wb_polished_content, $json.wb_session_id] }}"
+          }
+        },
+        "id": "sql-writeback-04",
+        "name": "SQL Write-Back",
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.5,
+        "position": [
+          1024,
+          192
+        ],
+        "credentials": {
+          "postgres": {
+            "id": "YOUR_POSTGRES_CREDENTIAL_ID",
+            "name": "Aerys DB (aerys)"
+          }
+        },
+        "continueOnFail": true
+      },
+      {
+        "parameters": {
+          "jsCode": "// Hardcoded — n8n Variables are Enterprise-only on this instance\nconst DEBUG_ENABLED = true; // flip to false to disable traces\nreturn [{json: {...$json, _debug_enabled: DEBUG_ENABLED}}];"
+        },
+        "id": "check-debug-enabled-06",
+        "name": "Check Debug Enabled",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          544,
+          480
+        ],
+        "continueOnFail": true
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "strict"
+            },
+            "conditions": [
+              {
+                "id": "debug-check-01",
+                "leftValue": "={{ $json._debug_enabled }}",
+                "rightValue": true,
+                "operator": {
+                  "type": "boolean",
+                  "operation": "true"
+                }
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        },
+        "id": "if-debug-enabled-06",
+        "name": "IF: Debug Enabled",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.2,
+        "position": [
+          784,
+          480
+        ],
+        "continueOnFail": true
+      },
+      {
+        "parameters": {
+          "jsCode": "// Crabwalk-style trace — NO user content, NO Aerys response text (privacy)\nconst steps = $json.intermediateSteps || [];\nconst model = ($json.model_tier || 'unknown').charAt(0).toUpperCase() + ($json.model_tier || 'unknown').slice(1);\nconst startTs = $json._start_ts || Date.now();\nconst elapsed = ((Date.now() - startTs) / 1000).toFixed(1);\n\nconst TOOL_PATTERNS = [\n  { pattern: /media/i, icon: '[IMG]', label: 'media' },\n  { pattern: /research/i, icon: '[RES]', label: 'research' },\n  { pattern: /email/i, icon: '[EML]', label: 'email' },\n];\n\nfunction matchTool(toolName) {\n  if (!toolName) return { icon: '[?]', label: 'unknown' };\n  const match = TOOL_PATTERNS.find(p => p.pattern.test(toolName));\n  return match || { icon: '[?]', label: toolName };\n}\n\nlet lines = [`[${model}] ${elapsed}s`];\n\nif (steps.length === 0) {\n  lines.push('+-- Direct response');\n} else {\n  let totalTokens = 0;\n  steps.forEach((step, i) => {\n    const isLast = i === steps.length - 1;\n    const prefix = isLast ? '+--' : '|--';\n    const tool = matchTool(step.action?.tool);\n    const tokens = step.tokenUsage?.totalTokens || 0;\n    totalTokens += tokens;\n    const tokenStr = tokens > 0 ? ` ${tokens} tokens` : '';\n    lines.push(`${prefix} ${tool.icon} ${tool.label}${tokenStr}`);\n  });\n  if (totalTokens > 0) {\n    lines.push(`+-- Total: ${totalTokens.toLocaleString()} tokens`);\n  }\n}\n\nreturn [{json: {\n  trace_message: '```\\n' + lines.join('\\n') + '\\n```',\n  debug_channel_id: 'YOUR_DEBUG_CHANNEL_ID'\n}}];"
+        },
+        "id": "format-trace-06",
+        "name": "Format Trace",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1024,
+          480
+        ],
+        "continueOnFail": true
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "=https://discord.com/api/v10/channels/{{ $json.debug_channel_id }}/messages",
+          "authentication": "predefinedCredentialType",
+          "nodeCredentialType": "discordBotApi",
+          "sendBody": true,
+          "contentType": "raw",
+          "rawContentType": "application/json",
+          "body": "={{ JSON.stringify({content: $json.trace_message}) }}",
+          "options": {
+            "response": {
+              "response": {
+                "neverError": true
+              }
+            }
+          }
+        },
+        "id": "send-trace-06",
+        "name": "Send Trace",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          1264,
+          480
+        ],
+        "retryOnFail": true,
+        "maxTries": 2,
+        "waitBetweenTries": 1000,
+        "credentials": {
+          "discordBotApi": {
+            "id": "YOUR_DISCORD_BOT_CREDENTIAL_ID",
+            "name": "Discord Bot account"
+          }
+        },
+        "continueOnFail": true,
+        "notes": "Sends debug trace to #aerys-debug. continueOnFail=true so trace failure never blocks user response. retryOnFail for DNS transient failures on Tachyon."
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": ""
+            },
+            "conditions": [
+              {
+                "id": "skip-polisher-check",
+                "leftValue": "={{ $json._jailbreak_detected }}",
+                "rightValue": true,
+                "operator": {
+                  "type": "boolean",
+                  "operation": "equals",
+                  "singleValue": true
+                }
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        },
+        "id": "skip-polisher-if",
+        "name": "IF: Skip Polisher",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.2,
+        "position": [
+          -144,
+          48
+        ]
+      },
+      {
+        "parameters": {
+          "jsCode": "// Bypass polisher — jailbreak deflections are already in-character\n// Pass output through as polished_response unchanged\nreturn [{json: {\n  ...$json,\n  polished_response: $json.output,\n  intermediateSteps: JSON.parse($json.intermediateSteps || '[]')\n}}];"
+        },
+        "id": "bypass-polisher-code",
+        "name": "Bypass Polisher",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          128,
+          -64
+        ]
+      }
+    ],
+    "connections": {
+      "Execute Workflow Trigger": {
+        "main": [
+          [
+            {
+              "node": "IF: Skip Polisher",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Build Polisher Context": {
+        "main": [
+          [
+            {
+              "node": "Polisher AI Agent",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Polisher AI Agent": {
+        "main": [
+          [
+            {
+              "node": "Set Polished Response",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Set Polished Response": {
+        "main": [
+          [
+            {
+              "node": "Prepare Write-Back",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Prepare Write-Back": {
+        "main": [
+          [
+            {
+              "node": "SQL Write-Back",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "SQL Write-Back": {
+        "main": [
+          [
+            {
+              "node": "Platform Formatter",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Platform Formatter": {
+        "main": [
+          [
+            {
+              "node": "Message Splitter",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Message Splitter": {
+        "main": [
+          [
+            {
+              "node": "Loop Over Chunks",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Loop Over Chunks": {
+        "main": [
+          [],
+          [
+            {
+              "node": "Switch: Route by Platform",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Switch: Route by Platform": {
+        "main": [
+          [
+            {
+              "node": "Build Discord Body",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Send Telegram Message",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Build Discord Body": {
+        "main": [
+          [
+            {
+              "node": "Send Discord Message",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Send Discord Message": {
+        "main": [
+          [
+            {
+              "node": "Loop Over Chunks",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Send Telegram Message": {
+        "main": [
+          [
+            {
+              "node": "Loop Over Chunks",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "OpenRouter Haiku (Polisher)": {
+        "ai_languageModel": [
+          [
+            {
+              "node": "Polisher AI Agent",
+              "type": "ai_languageModel",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Check Debug Enabled": {
+        "main": [
+          [
+            {
+              "node": "IF: Debug Enabled",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "IF: Debug Enabled": {
+        "main": [
+          [
+            {
+              "node": "Format Trace",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          []
+        ]
+      },
+      "Format Trace": {
+        "main": [
+          [
+            {
+              "node": "Send Trace",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "IF: Skip Polisher": {
+        "main": [
+          [
+            {
+              "node": "Bypass Polisher",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Build Polisher Context",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Bypass Polisher": {
+        "main": [
+          [
+            {
+              "node": "Set Polished Response",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "authors": "Your Name",
+    "name": null,
+    "description": null,
+    "autosaved": false,
+    "workflowPublishHistory": [
+      {
+        "createdAt": "2026-03-22T02:03:04.264Z",
+        "id": 1429,
+        "workflowId": "YOUR_OUTPUT_ROUTER_WORKFLOW_ID",
+        "versionId": "00000000-0000-0000-0000-000000000000",
+        "event": "deactivated",
+        "userId": "00000000-0000-0000-0000-000000000000"
+      },
+      {
+        "createdAt": "2026-03-22T02:03:04.377Z",
+        "id": 1430,
+        "workflowId": "YOUR_OUTPUT_ROUTER_WORKFLOW_ID",
+        "versionId": "00000000-0000-0000-0000-000000000000",
+        "event": "activated",
+        "userId": "00000000-0000-0000-0000-000000000000"
+      }
+    ]
+  }
+}

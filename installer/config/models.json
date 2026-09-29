@@ -1,0 +1,19 @@
+{
+  "models": {
+    "gemini": "gemini-2.5-flash-lite",
+    "sonnet": "anthropic/claude-sonnet-4-6",
+    "opus": "anthropic/claude-opus-4-6"
+  },
+  "routing": {
+    "greeting": "gemini",
+    "simple_qa": "sonnet",
+    "code_help": "sonnet",
+    "research": "opus",
+    "creative": "sonnet",
+    "analysis": "opus",
+    "system_task": "gemini"
+  },
+  "limits": {
+    "opus_daily": 10
+  }
+}

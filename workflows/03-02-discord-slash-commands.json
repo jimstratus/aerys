@@ -1,6 +1,6 @@
 {
-  "updatedAt": "2026-01-01T00:00:00.000Z",
-  "createdAt": "2026-01-01T00:00:00.000Z",
+  "updatedAt": "2026-03-18T00:54:26.073Z",
+  "createdAt": "2026-02-21T16:14:32.740Z",
   "id": "03-02-discord-slash-commands",
   "name": "03-02 Aerys Discord Slash Commands",
   "description": null,
@@ -24,11 +24,11 @@
         240,
         304
       ],
-      "webhookId": "00000000-0000-0000-0000-000000000000"
+      "webhookId": "discord-slash-commands-webhook-01"
     },
     {
       "parameters": {
-        "jsCode": "// ParseInteraction — parse Discord slash command interaction\nconst body = $input.item.json.body || $input.item.json;\n\n// Type 1 = PING (Discord validation)\nif (body.type === 1) {\n  return [{ json: { isPing: true, application_id: body.application_id } }];\n}\n\n// Type 2 = APPLICATION_COMMAND (slash command)\nif (body.type === 2) {\n  const data    = body.data || {};\n  const user    = body.member?.user || body.user || {};\n  const options = data.options || [];\n  const guild_id = body.guild_id;\n\n  const optionValues = {};\n  for (const opt of options) {\n    optionValues[opt.name] = opt.value;\n  }\n\n  return [{\n    json: {\n      isPing: false,\n      application_id: body.application_id,\n      commandName: data.name || 'unknown',\n      userId: user.id,\n      username: user.username || user.global_name || 'Unknown',\n      guild_id,\n      interaction_id: body.id,\n      interaction_token: body.token,\n      options: optionValues\n    }\n  }];\n}\n\nreturn [{ json: { isPing: false, application_id: null, error: 'Unknown interaction type' } }];\n"
+        "jsCode": "// ParseInteraction \u2014 parse Discord slash command interaction\nconst body = $input.item.json.body || $input.item.json;\n\n// Type 1 = PING (Discord validation)\nif (body.type === 1) {\n  return [{ json: { isPing: true, application_id: body.application_id } }];\n}\n\n// Type 2 = APPLICATION_COMMAND (slash command)\nif (body.type === 2) {\n  const data    = body.data || {};\n  const user    = body.member?.user || body.user || {};\n  const options = data.options || [];\n  const guild_id = body.guild_id;\n\n  const optionValues = {};\n  for (const opt of options) {\n    optionValues[opt.name] = opt.value;\n  }\n\n  return [{\n    json: {\n      isPing: false,\n      application_id: body.application_id,\n      commandName: data.name || 'unknown',\n      userId: user.id,\n      username: user.username || user.global_name || 'Unknown',\n      guild_id,\n      interaction_id: body.id,\n      interaction_token: body.token,\n      options: optionValues\n    }\n  }];\n}\n\nreturn [{ json: { isPing: false, application_id: null, error: 'Unknown interaction type' } }];\n"
       },
       "id": "parse-interaction-slash-01",
       "name": "ParseInteraction",
@@ -472,7 +472,10 @@
         2000,
         208
       ],
-      "onError": "continueRegularOutput"
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
     },
     {
       "parameters": {
@@ -579,7 +582,10 @@
         1792,
         384
       ],
-      "onError": "continueRegularOutput"
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
     },
     {
       "parameters": {
@@ -669,7 +675,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Generate 6-char verification code (Math.random — crypto not available in n8n sandbox)\nconst CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';\nlet code = '';\nfor (let i = 0; i < 6; i++) {\n  code += CHARS[Math.floor(Math.random() * CHARS.length)];\n}\nconst expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();\nconst incoming = $input.item.json;\n\nreturn [{ json: { ...incoming, verification_code: code, expires_at: expiresAt } }];"
+        "jsCode": "// Generate 6-char verification code (Math.random \u2014 crypto not available in n8n sandbox)\nconst CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';\nlet code = '';\nfor (let i = 0; i < 6; i++) {\n  code += CHARS[Math.floor(Math.random() * CHARS.length)];\n}\nconst expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();\nconst incoming = $input.item.json;\n\nreturn [{ json: { ...incoming, verification_code: code, expires_at: expiresAt } }];"
       },
       "id": "generate-link-code-slash-01",
       "name": "Generate Link Code",
@@ -730,7 +736,10 @@
         2224,
         512
       ],
-      "onError": "continueRegularOutput"
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
     },
     {
       "parameters": {
@@ -813,7 +822,10 @@
         2224,
         720
       ],
-      "onError": "continueRegularOutput"
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
     },
     {
       "parameters": {
@@ -873,7 +885,10 @@
         2448,
         544
       ],
-      "onError": "continueRegularOutput"
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
     },
     {
       "parameters": {
@@ -1040,7 +1055,10 @@
         3760,
         672
       ],
-      "onError": "continueRegularOutput"
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
     },
     {
       "parameters": {
@@ -1201,7 +1219,10 @@
         2224,
         704
       ],
-      "onError": "continueRegularOutput"
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
     },
     {
       "parameters": {
@@ -1219,7 +1240,7 @@
         "sendBody": true,
         "contentType": "raw",
         "rawContentType": "application/json",
-        "body": "{\"content\":\"No linked account to unlink — you only have one platform connected.\",\"flags\":64}",
+        "body": "{\"content\":\"No linked account to unlink \u2014 you only have one platform connected.\",\"flags\":64}",
         "options": {}
       },
       "id": "respond-cannot-unlink-slash-01",
@@ -1230,7 +1251,10 @@
         2000,
         832
       ],
-      "onError": "continueRegularOutput"
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
     },
     {
       "parameters": {
@@ -1259,7 +1283,10 @@
         1120,
         912
       ],
-      "onError": "continueRegularOutput"
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
     },
     {
       "parameters": {
@@ -1282,11 +1309,14 @@
           "name": "Discord Bot account"
         }
       },
-      "notes": "Fetch guild member from Discord REST API to get their roles array. Never use trigger payload roles (Pitfall 4: katerlol doesn't guarantee guild member data)."
+      "notes": "Fetch guild member from Discord REST API to get their roles array. Never use trigger payload roles (Pitfall 4: katerlol doesn't guarantee guild member data).",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
     },
     {
       "parameters": {
-        "jsCode": "// Evaluate admin role\n// n8n Variables not licensed on this instance — role ID is hardcoded here.\n// Role ID must be a STRING — Discord returns roles[] as strings; JS number literals\n// above Number.MAX_SAFE_INTEGER lose precision and will never match.\nconst AERYS_ADMIN_ROLE_ID = 'YOUR_ADMIN_ROLE_ID';\n\nconst member = $input.item.json;\nconst roles = member.roles || [];\nconst isAdmin = roles.includes(AERYS_ADMIN_ROLE_ID);\n\n// Carry forward the original interaction data from ParseInteraction\nconst interaction = $('ParseInteraction').item.json;\nreturn [{ json: { ...interaction, _guild_member: member, _is_admin: isAdmin } }];"
+        "jsCode": "// Evaluate admin role\n// n8n Variables not licensed on this instance \u2014 role ID is hardcoded here.\n// Role ID must be a STRING \u2014 Discord returns roles[] as strings; JS number literals\n// above Number.MAX_SAFE_INTEGER lose precision and will never match.\nconst AERYS_ADMIN_ROLE_ID = 'YOUR_ADMIN_ROLE_ID';\n\nconst member = $input.item.json;\nconst roles = member.roles || [];\nconst isAdmin = roles.includes(AERYS_ADMIN_ROLE_ID);\n\n// Carry forward the original interaction data from ParseInteraction\nconst interaction = $('ParseInteraction').item.json;\nreturn [{ json: { ...interaction, _guild_member: member, _is_admin: isAdmin } }];"
       },
       "id": "evaluate-role-link-01",
       "name": "Evaluate Role (link)",
@@ -1357,7 +1387,10 @@
         992
       ],
       "notes": "Sends ephemeral unauthorized reply (flags:64) for non-admin users trying admin-link.",
-      "onError": "continueRegularOutput"
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
     },
     {
       "parameters": {
@@ -1407,7 +1440,7 @@
         "sendBody": true,
         "contentType": "raw",
         "rawContentType": "application/json",
-        "body": "={\"content\":\"{{ $json.already_linked ? 'These accounts are already linked.' : ($json.discord_missing ? 'Discord user ' + $json.discord_id + ' has no Aerys identity yet — they must send a message first.' : 'Telegram user ' + $json.telegram_id + ' has no Aerys identity yet — they must send a message first.') }}\",\"flags\":64}",
+        "body": "={\"content\":\"{{ $json.already_linked ? 'These accounts are already linked.' : ($json.discord_missing ? 'Discord user ' + $json.discord_id + ' has no Aerys identity yet \u2014 they must send a message first.' : 'Telegram user ' + $json.telegram_id + ' has no Aerys identity yet \u2014 they must send a message first.') }}\",\"flags\":64}",
         "options": {}
       },
       "id": "respond-admin-link-noop-01",
@@ -1419,7 +1452,10 @@
         992
       ],
       "notes": "Handles edge cases: already linked, or one/both accounts don't exist yet.",
-      "onError": "continueRegularOutput"
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
     },
     {
       "parameters": {
@@ -1587,7 +1623,10 @@
           "name": "Discord Bot account"
         }
       },
-      "notes": "Open DM channel with the Discord user. Returns channel.id for sending the notification message."
+      "notes": "Open DM channel with the Discord user. Returns channel.id for sending the notification message.",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
     },
     {
       "parameters": {
@@ -1620,7 +1659,10 @@
           "name": "Discord Bot account"
         }
       },
-      "notes": "Send DM notification to Discord user. neverError=true: if user has DMs disabled, silently continue."
+      "notes": "Send DM notification to Discord user. neverError=true: if user has DMs disabled, silently continue.",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
     },
     {
       "parameters": {
@@ -1638,14 +1680,14 @@
         4432,
         1088
       ],
-      "webhookId": "00000000-0000-0000-0000-000000000000",
+      "webhookId": "5ce3212b-09fd-45a6-a795-ccbc02e359fa",
       "credentials": {
         "telegramApi": {
           "id": "YOUR_TELEGRAM_CREDENTIAL_ID",
           "name": "Telegram account"
         }
       },
-      "notes": "Send Telegram notification. Uses n8n Telegram credential (n8n Variables not licensed, so direct HTTP with token not possible). If user has blocked bot, this will fail — wrapped in error-tolerant flow."
+      "notes": "Send Telegram notification. Uses n8n Telegram credential (n8n Variables not licensed, so direct HTTP with token not possible). If user has blocked bot, this will fail \u2014 wrapped in error-tolerant flow."
     },
     {
       "parameters": {
@@ -1675,7 +1717,10 @@
         1088
       ],
       "notes": "Ephemeral admin-only reply confirming the force-link. Shows both IDs.",
-      "onError": "continueRegularOutput"
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
     },
     {
       "parameters": {
@@ -1698,11 +1743,14 @@
           "name": "Discord Bot account"
         }
       },
-      "notes": "Fetch guild member from Discord REST API to verify admin role for /admin-unlink."
+      "notes": "Fetch guild member from Discord REST API to verify admin role for /admin-unlink.",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
     },
     {
       "parameters": {
-        "jsCode": "// Evaluate admin role for /admin-unlink\n// n8n Variables not licensed on this instance — role ID is hardcoded here.\n// Role ID must be a STRING — Discord returns roles[] as strings; JS number literals\n// above Number.MAX_SAFE_INTEGER lose precision and will never match.\nconst AERYS_ADMIN_ROLE_ID = 'YOUR_ADMIN_ROLE_ID';\n\nconst member = $input.item.json;\nconst roles = member.roles || [];\nconst isAdmin = roles.includes(AERYS_ADMIN_ROLE_ID);\n\n// Carry forward the original interaction data from ParseInteraction\nconst interaction = $('ParseInteraction').item.json;\nreturn [{ json: { ...interaction, _guild_member: member, _is_admin: isAdmin } }];"
+        "jsCode": "// Evaluate admin role for /admin-unlink\n// n8n Variables not licensed on this instance \u2014 role ID is hardcoded here.\n// Role ID must be a STRING \u2014 Discord returns roles[] as strings; JS number literals\n// above Number.MAX_SAFE_INTEGER lose precision and will never match.\nconst AERYS_ADMIN_ROLE_ID = 'YOUR_ADMIN_ROLE_ID';\n\nconst member = $input.item.json;\nconst roles = member.roles || [];\nconst isAdmin = roles.includes(AERYS_ADMIN_ROLE_ID);\n\n// Carry forward the original interaction data from ParseInteraction\nconst interaction = $('ParseInteraction').item.json;\nreturn [{ json: { ...interaction, _guild_member: member, _is_admin: isAdmin } }];"
       },
       "id": "evaluate-role-unlink-01",
       "name": "Evaluate Role (unlink)",
@@ -1773,7 +1821,10 @@
         1168
       ],
       "notes": "Sends ephemeral unauthorized reply for non-admin users trying admin-unlink.",
-      "onError": "continueRegularOutput"
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
     },
     {
       "parameters": {
@@ -1859,7 +1910,10 @@
         1168
       ],
       "notes": "Ephemeral reply: identity not found for admin-unlink.",
-      "onError": "continueRegularOutput"
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
     },
     {
       "parameters": {
@@ -1913,7 +1967,10 @@
         1264
       ],
       "notes": "Ephemeral admin-only confirmation of force-unlink.",
-      "onError": "continueRegularOutput"
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
     },
     {
       "parameters": {
@@ -1937,7 +1994,7 @@
           "name": "Aerys DB (aerys)"
         }
       },
-      "notes": "Single query using COALESCE subqueries — ALWAYS returns 1 row with NULL for missing identities. Prevents empty-result workflow stop."
+      "notes": "Single query using COALESCE subqueries \u2014 ALWAYS returns 1 row with NULL for missing identities. Prevents empty-result workflow stop."
     },
     {
       "parameters": {
@@ -1954,7 +2011,7 @@
       "notes": "Processes 0-2 rows from Lookup Both Identities. Determines merge strategy: winner=Discord, loser=Telegram. Handles missing identities gracefully."
     },
     {
-      "id": "00000000-0000-0000-0000-000000000000",
+      "id": "67e9a577-546f-427d-a219-fe32699faa07",
       "name": "RespondDeferred",
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.1,
@@ -2192,7 +2249,7 @@
         960
       ],
       "parameters": {
-        "jsCode": "const rows = $input.all().map(i => i.json);\nconst ctx = $('Merge person_id (memory)').first().json;\nconst realRows = rows.filter(r => r.core_id !== null && r.core_id !== undefined);\nif (realRows.length === 0) {\n  return [{ json: { ...ctx, reply: \"I don't have any stored memories about you yet.\" } }];\n}\nconst lines = realRows.map(r => {\n  const lock = r.locked ? ' 🔒' : '';\n  const status = r.status === 'provisional' ? ' *(provisional)*' : '';\n  // Strip timestamp suffix from user.stated.NNNN -> user.stated\n  const keyLabel = r.key_label.replace(/\\.\\d{10,}$/, '');\n  // Avoid double-prefix if claim_text already starts with key_label\n  const prefix = keyLabel + ': ';\n  const text = r.claim_text.startsWith(prefix) || r.claim_text.startsWith(r.key_label + ': ')\n    ? r.claim_text.replace(r.key_label + ': ', prefix)\n    : prefix + r.claim_text;\n  return '• ' + text + lock + status;\n});\nreturn [{ json: { ...ctx, reply: '**What I remember about you:**\\n' + lines.join('\\n') } }];"
+        "jsCode": "const rows = $input.all().map(i => i.json);\nconst ctx = $('Merge person_id (memory)').first().json;\nconst realRows = rows.filter(r => r.core_id !== null && r.core_id !== undefined);\nif (realRows.length === 0) {\n  return [{ json: { ...ctx, reply: \"I don't have any stored memories about you yet.\" } }];\n}\nconst lines = realRows.map(r => {\n  const lock = r.locked ? ' \ud83d\udd12' : '';\n  const status = r.status === 'provisional' ? ' *(provisional)*' : '';\n  // Strip timestamp suffix from user.stated.NNNN -> user.stated\n  const keyLabel = r.key_label.replace(/\\.\\d{10,}$/, '');\n  // Avoid double-prefix if claim_text already starts with key_label\n  const prefix = keyLabel + ': ';\n  const text = r.claim_text.startsWith(prefix) || r.claim_text.startsWith(r.key_label + ': ')\n    ? r.claim_text.replace(r.key_label + ': ', prefix)\n    : prefix + r.claim_text;\n  return '\u2022 ' + text + lock + status;\n});\nreturn [{ json: { ...ctx, reply: '**What I remember about you:**\\n' + lines.join('\\n') } }];"
       }
     },
     {
@@ -2229,7 +2286,10 @@
         "body": "={{ JSON.stringify({content: $json.reply, flags: 64}) }}",
         "contentType": "raw",
         "rawContentType": "application/json"
-      }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
     },
     {
       "id": "mem-pin-search-01",
@@ -2309,7 +2369,7 @@
       ],
       "parameters": {
         "method": "POST",
-        "url": "http://localhost:5678/webhook/aerys-override-api",
+        "url": "http://YOUR_AERYS_HOST_IP:5678/webhook/aerys-override-api",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
@@ -2329,7 +2389,10 @@
             }
           }
         }
-      }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
     },
     {
       "id": "mem-pin-reply-01",
@@ -2341,7 +2404,7 @@
         1160
       ],
       "parameters": {
-        "jsCode": "const ctx = $('Merge person_id (memory)').first().json;\nconst found = $('Pin Search').first().json;\nreturn [{ json: { ...ctx, reply: 'Locked: **' + found.claim_text + '** — I won\\'t overwrite this.' } }];"
+        "jsCode": "const ctx = $('Merge person_id (memory)').first().json;\nconst found = $('Pin Search').first().json;\nreturn [{ json: { ...ctx, reply: 'Locked: **' + found.claim_text + '** \u2014 I won\\'t overwrite this.' } }];"
       }
     },
     {
@@ -2378,7 +2441,10 @@
         "body": "={{ JSON.stringify({content: $json.reply, flags: 64}) }}",
         "contentType": "raw",
         "rawContentType": "application/json"
-      }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
     },
     {
       "id": "mem-forget-search-01",
@@ -2502,7 +2568,7 @@
       ],
       "parameters": {
         "method": "POST",
-        "url": "http://localhost:5678/webhook/aerys-override-api",
+        "url": "http://YOUR_AERYS_HOST_IP:5678/webhook/aerys-override-api",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
@@ -2522,7 +2588,10 @@
             }
           }
         }
-      }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
     },
     {
       "id": "mem-forget-reply-01",
@@ -2534,7 +2603,7 @@
         1420
       ],
       "parameters": {
-        "jsCode": "const ctx = $('Merge person_id (memory)').first().json;\nreturn [{ json: { ...ctx, reply: \"Done — I've retracted that memory.\" } }];"
+        "jsCode": "const ctx = $('Merge person_id (memory)').first().json;\nreturn [{ json: { ...ctx, reply: \"Done \u2014 I've retracted that memory.\" } }];"
       }
     },
     {
@@ -2571,7 +2640,10 @@
         "body": "={{ JSON.stringify({content: $json.reply, flags: 64}) }}",
         "contentType": "raw",
         "rawContentType": "application/json"
-      }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
     },
     {
       "id": "mem-correct-search-01",
@@ -2651,7 +2723,7 @@
       ],
       "parameters": {
         "method": "POST",
-        "url": "http://localhost:5678/webhook/aerys-override-api",
+        "url": "http://YOUR_AERYS_HOST_IP:5678/webhook/aerys-override-api",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
@@ -2671,7 +2743,10 @@
             }
           }
         }
-      }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
     },
     {
       "id": "mem-correct-reply-01",
@@ -2683,7 +2758,7 @@
         1580
       ],
       "parameters": {
-        "jsCode": "const ctx = $('Merge person_id (memory)').first().json;\nreturn [{ json: { ...ctx, reply: \"Updated — I've noted the correction.\" } }];"
+        "jsCode": "const ctx = $('Merge person_id (memory)').first().json;\nreturn [{ json: { ...ctx, reply: \"Updated \u2014 I've noted the correction.\" } }];"
       }
     },
     {
@@ -2720,7 +2795,10 @@
         "body": "={{ JSON.stringify({content: $json.reply, flags: 64}) }}",
         "contentType": "raw",
         "rawContentType": "application/json"
-      }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
     },
     {
       "id": "mem-tell-api-01",
@@ -2733,7 +2811,7 @@
       ],
       "parameters": {
         "method": "POST",
-        "url": "http://localhost:5678/webhook/aerys-override-api",
+        "url": "http://YOUR_AERYS_HOST_IP:5678/webhook/aerys-override-api",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
@@ -2753,7 +2831,10 @@
             }
           }
         }
-      }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
     },
     {
       "id": "mem-tell-reply-01",
@@ -2765,7 +2846,7 @@
         1720
       ],
       "parameters": {
-        "jsCode": "const ctx = $('Merge person_id (memory)').first().json;\nreturn [{ json: { ...ctx, reply: \"Got it — I've added that to what I know about you.\" } }];"
+        "jsCode": "const ctx = $('Merge person_id (memory)').first().json;\nreturn [{ json: { ...ctx, reply: \"Got it \u2014 I've added that to what I know about you.\" } }];"
       }
     },
     {
@@ -2802,7 +2883,10 @@
         "body": "={{ JSON.stringify({content: $json.reply, flags: 64}) }}",
         "contentType": "raw",
         "rawContentType": "application/json"
-      }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
     }
   ],
   "connections": {
@@ -3892,21 +3976,22 @@
   "settings": {
     "executionOrder": "v1",
     "callerPolicy": "workflowsFromSameOwner",
-    "availableInMCP": false
+    "availableInMCP": false,
+    "errorWorkflow": "YOUR_CENTRAL_ERROR_WORKFLOW_ID"
   },
   "staticData": null,
   "meta": null,
   "pinData": {},
   "versionId": "00000000-0000-0000-0000-000000000000",
   "activeVersionId": "00000000-0000-0000-0000-000000000000",
-  "versionCounter": 102,
-  "triggerCount": 1,
+  "versionCounter": 122,
+  "triggerCount": 0,
   "shared": [
     {
       "updatedAt": "2026-02-21T16:14:32.740Z",
       "createdAt": "2026-02-21T16:14:32.740Z",
       "role": "workflow:owner",
-      "workflowId": "YOUR_SLASH_COMMANDS_WORKFLOW_ID",
+      "workflowId": "YOUR_DISCORD_SLASH_COMMANDS_WORKFLOW_ID",
       "projectId": "YOUR_N8N_PROJECT_ID",
       "project": {
         "updatedAt": "2026-01-01T00:00:00.000Z",
@@ -3922,10 +4007,10 @@
   ],
   "tags": [],
   "activeVersion": {
-    "updatedAt": "2026-02-25T23:33:49.637Z",
-    "createdAt": "2026-02-25T23:33:49.637Z",
+    "updatedAt": "2026-03-18T00:54:26.082Z",
+    "createdAt": "2026-03-18T00:54:26.082Z",
     "versionId": "00000000-0000-0000-0000-000000000000",
-    "workflowId": "YOUR_SLASH_COMMANDS_WORKFLOW_ID",
+    "workflowId": "YOUR_DISCORD_SLASH_COMMANDS_WORKFLOW_ID",
     "nodes": [
       {
         "parameters": {
@@ -3948,7 +4033,7 @@
       },
       {
         "parameters": {
-          "jsCode": "// ParseInteraction — parse Discord slash command interaction\nconst body = $input.item.json.body || $input.item.json;\n\n// Type 1 = PING (Discord validation)\nif (body.type === 1) {\n  return [{ json: { isPing: true, application_id: body.application_id } }];\n}\n\n// Type 2 = APPLICATION_COMMAND (slash command)\nif (body.type === 2) {\n  const data    = body.data || {};\n  const user    = body.member?.user || body.user || {};\n  const options = data.options || [];\n  const guild_id = body.guild_id;\n\n  const optionValues = {};\n  for (const opt of options) {\n    optionValues[opt.name] = opt.value;\n  }\n\n  return [{\n    json: {\n      isPing: false,\n      application_id: body.application_id,\n      commandName: data.name || 'unknown',\n      userId: user.id,\n      username: user.username || user.global_name || 'Unknown',\n      guild_id,\n      interaction_id: body.id,\n      interaction_token: body.token,\n      options: optionValues\n    }\n  }];\n}\n\nreturn [{ json: { isPing: false, application_id: null, error: 'Unknown interaction type' } }];\n"
+          "jsCode": "// ParseInteraction \u2014 parse Discord slash command interaction\nconst body = $input.item.json.body || $input.item.json;\n\n// Type 1 = PING (Discord validation)\nif (body.type === 1) {\n  return [{ json: { isPing: true, application_id: body.application_id } }];\n}\n\n// Type 2 = APPLICATION_COMMAND (slash command)\nif (body.type === 2) {\n  const data    = body.data || {};\n  const user    = body.member?.user || body.user || {};\n  const options = data.options || [];\n  const guild_id = body.guild_id;\n\n  const optionValues = {};\n  for (const opt of options) {\n    optionValues[opt.name] = opt.value;\n  }\n\n  return [{\n    json: {\n      isPing: false,\n      application_id: body.application_id,\n      commandName: data.name || 'unknown',\n      userId: user.id,\n      username: user.username || user.global_name || 'Unknown',\n      guild_id,\n      interaction_id: body.id,\n      interaction_token: body.token,\n      options: optionValues\n    }\n  }];\n}\n\nreturn [{ json: { isPing: false, application_id: null, error: 'Unknown interaction type' } }];\n"
         },
         "id": "parse-interaction-slash-01",
         "name": "ParseInteraction",
@@ -4392,7 +4477,10 @@
           2000,
           208
         ],
-        "onError": "continueRegularOutput"
+        "onError": "continueRegularOutput",
+        "retryOnFail": true,
+        "maxTries": 3,
+        "waitBetweenTries": 2000
       },
       {
         "parameters": {
@@ -4499,7 +4587,10 @@
           1792,
           384
         ],
-        "onError": "continueRegularOutput"
+        "onError": "continueRegularOutput",
+        "retryOnFail": true,
+        "maxTries": 3,
+        "waitBetweenTries": 2000
       },
       {
         "parameters": {
@@ -4589,7 +4680,7 @@
       },
       {
         "parameters": {
-          "jsCode": "// Generate 6-char verification code (Math.random — crypto not available in n8n sandbox)\nconst CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';\nlet code = '';\nfor (let i = 0; i < 6; i++) {\n  code += CHARS[Math.floor(Math.random() * CHARS.length)];\n}\nconst expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();\nconst incoming = $input.item.json;\n\nreturn [{ json: { ...incoming, verification_code: code, expires_at: expiresAt } }];"
+          "jsCode": "// Generate 6-char verification code (Math.random \u2014 crypto not available in n8n sandbox)\nconst CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';\nlet code = '';\nfor (let i = 0; i < 6; i++) {\n  code += CHARS[Math.floor(Math.random() * CHARS.length)];\n}\nconst expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();\nconst incoming = $input.item.json;\n\nreturn [{ json: { ...incoming, verification_code: code, expires_at: expiresAt } }];"
         },
         "id": "generate-link-code-slash-01",
         "name": "Generate Link Code",
@@ -4650,7 +4741,10 @@
           2224,
           512
         ],
-        "onError": "continueRegularOutput"
+        "onError": "continueRegularOutput",
+        "retryOnFail": true,
+        "maxTries": 3,
+        "waitBetweenTries": 2000
       },
       {
         "parameters": {
@@ -4733,7 +4827,10 @@
           2224,
           720
         ],
-        "onError": "continueRegularOutput"
+        "onError": "continueRegularOutput",
+        "retryOnFail": true,
+        "maxTries": 3,
+        "waitBetweenTries": 2000
       },
       {
         "parameters": {
@@ -4793,7 +4890,10 @@
           2448,
           544
         ],
-        "onError": "continueRegularOutput"
+        "onError": "continueRegularOutput",
+        "retryOnFail": true,
+        "maxTries": 3,
+        "waitBetweenTries": 2000
       },
       {
         "parameters": {
@@ -4960,7 +5060,10 @@
           3760,
           672
         ],
-        "onError": "continueRegularOutput"
+        "onError": "continueRegularOutput",
+        "retryOnFail": true,
+        "maxTries": 3,
+        "waitBetweenTries": 2000
       },
       {
         "parameters": {
@@ -5121,7 +5224,10 @@
           2224,
           704
         ],
-        "onError": "continueRegularOutput"
+        "onError": "continueRegularOutput",
+        "retryOnFail": true,
+        "maxTries": 3,
+        "waitBetweenTries": 2000
       },
       {
         "parameters": {
@@ -5139,7 +5245,7 @@
           "sendBody": true,
           "contentType": "raw",
           "rawContentType": "application/json",
-          "body": "{\"content\":\"No linked account to unlink — you only have one platform connected.\",\"flags\":64}",
+          "body": "{\"content\":\"No linked account to unlink \u2014 you only have one platform connected.\",\"flags\":64}",
           "options": {}
         },
         "id": "respond-cannot-unlink-slash-01",
@@ -5150,7 +5256,10 @@
           2000,
           832
         ],
-        "onError": "continueRegularOutput"
+        "onError": "continueRegularOutput",
+        "retryOnFail": true,
+        "maxTries": 3,
+        "waitBetweenTries": 2000
       },
       {
         "parameters": {
@@ -5179,7 +5288,10 @@
           1120,
           912
         ],
-        "onError": "continueRegularOutput"
+        "onError": "continueRegularOutput",
+        "retryOnFail": true,
+        "maxTries": 3,
+        "waitBetweenTries": 2000
       },
       {
         "parameters": {
@@ -5202,11 +5314,14 @@
             "name": "Discord Bot account"
           }
         },
-        "notes": "Fetch guild member from Discord REST API to get their roles array. Never use trigger payload roles (Pitfall 4: katerlol doesn't guarantee guild member data)."
+        "notes": "Fetch guild member from Discord REST API to get their roles array. Never use trigger payload roles (Pitfall 4: katerlol doesn't guarantee guild member data).",
+        "retryOnFail": true,
+        "maxTries": 3,
+        "waitBetweenTries": 2000
       },
       {
         "parameters": {
-          "jsCode": "// Evaluate admin role\n// n8n Variables not licensed on this instance — role ID is hardcoded here.\n// Role ID must be a STRING — Discord returns roles[] as strings; JS number literals\n// above Number.MAX_SAFE_INTEGER lose precision and will never match.\nconst AERYS_ADMIN_ROLE_ID = 'YOUR_ADMIN_ROLE_ID';\n\nconst member = $input.item.json;\nconst roles = member.roles || [];\nconst isAdmin = roles.includes(AERYS_ADMIN_ROLE_ID);\n\n// Carry forward the original interaction data from ParseInteraction\nconst interaction = $('ParseInteraction').item.json;\nreturn [{ json: { ...interaction, _guild_member: member, _is_admin: isAdmin } }];"
+          "jsCode": "// Evaluate admin role\n// n8n Variables not licensed on this instance \u2014 role ID is hardcoded here.\n// Role ID must be a STRING \u2014 Discord returns roles[] as strings; JS number literals\n// above Number.MAX_SAFE_INTEGER lose precision and will never match.\nconst AERYS_ADMIN_ROLE_ID = 'YOUR_ADMIN_ROLE_ID';\n\nconst member = $input.item.json;\nconst roles = member.roles || [];\nconst isAdmin = roles.includes(AERYS_ADMIN_ROLE_ID);\n\n// Carry forward the original interaction data from ParseInteraction\nconst interaction = $('ParseInteraction').item.json;\nreturn [{ json: { ...interaction, _guild_member: member, _is_admin: isAdmin } }];"
         },
         "id": "evaluate-role-link-01",
         "name": "Evaluate Role (link)",
@@ -5277,7 +5392,10 @@
           992
         ],
         "notes": "Sends ephemeral unauthorized reply (flags:64) for non-admin users trying admin-link.",
-        "onError": "continueRegularOutput"
+        "onError": "continueRegularOutput",
+        "retryOnFail": true,
+        "maxTries": 3,
+        "waitBetweenTries": 2000
       },
       {
         "parameters": {
@@ -5327,7 +5445,7 @@
           "sendBody": true,
           "contentType": "raw",
           "rawContentType": "application/json",
-          "body": "={\"content\":\"{{ $json.already_linked ? 'These accounts are already linked.' : ($json.discord_missing ? 'Discord user ' + $json.discord_id + ' has no Aerys identity yet — they must send a message first.' : 'Telegram user ' + $json.telegram_id + ' has no Aerys identity yet — they must send a message first.') }}\",\"flags\":64}",
+          "body": "={\"content\":\"{{ $json.already_linked ? 'These accounts are already linked.' : ($json.discord_missing ? 'Discord user ' + $json.discord_id + ' has no Aerys identity yet \u2014 they must send a message first.' : 'Telegram user ' + $json.telegram_id + ' has no Aerys identity yet \u2014 they must send a message first.') }}\",\"flags\":64}",
           "options": {}
         },
         "id": "respond-admin-link-noop-01",
@@ -5339,7 +5457,10 @@
           992
         ],
         "notes": "Handles edge cases: already linked, or one/both accounts don't exist yet.",
-        "onError": "continueRegularOutput"
+        "onError": "continueRegularOutput",
+        "retryOnFail": true,
+        "maxTries": 3,
+        "waitBetweenTries": 2000
       },
       {
         "parameters": {
@@ -5507,7 +5628,10 @@
             "name": "Discord Bot account"
           }
         },
-        "notes": "Open DM channel with the Discord user. Returns channel.id for sending the notification message."
+        "notes": "Open DM channel with the Discord user. Returns channel.id for sending the notification message.",
+        "retryOnFail": true,
+        "maxTries": 3,
+        "waitBetweenTries": 2000
       },
       {
         "parameters": {
@@ -5540,7 +5664,10 @@
             "name": "Discord Bot account"
           }
         },
-        "notes": "Send DM notification to Discord user. neverError=true: if user has DMs disabled, silently continue."
+        "notes": "Send DM notification to Discord user. neverError=true: if user has DMs disabled, silently continue.",
+        "retryOnFail": true,
+        "maxTries": 3,
+        "waitBetweenTries": 2000
       },
       {
         "parameters": {
@@ -5558,14 +5685,14 @@
           4432,
           1088
         ],
-        "webhookId": "00000000-0000-0000-0000-000000000000",
+        "webhookId": "5ce3212b-09fd-45a6-a795-ccbc02e359fa",
         "credentials": {
           "telegramApi": {
             "id": "YOUR_TELEGRAM_CREDENTIAL_ID",
             "name": "Telegram account"
           }
         },
-        "notes": "Send Telegram notification. Uses n8n Telegram credential (n8n Variables not licensed, so direct HTTP with token not possible). If user has blocked bot, this will fail — wrapped in error-tolerant flow."
+        "notes": "Send Telegram notification. Uses n8n Telegram credential (n8n Variables not licensed, so direct HTTP with token not possible). If user has blocked bot, this will fail \u2014 wrapped in error-tolerant flow."
       },
       {
         "parameters": {
@@ -5595,7 +5722,10 @@
           1088
         ],
         "notes": "Ephemeral admin-only reply confirming the force-link. Shows both IDs.",
-        "onError": "continueRegularOutput"
+        "onError": "continueRegularOutput",
+        "retryOnFail": true,
+        "maxTries": 3,
+        "waitBetweenTries": 2000
       },
       {
         "parameters": {
@@ -5618,11 +5748,14 @@
             "name": "Discord Bot account"
           }
         },
-        "notes": "Fetch guild member from Discord REST API to verify admin role for /admin-unlink."
+        "notes": "Fetch guild member from Discord REST API to verify admin role for /admin-unlink.",
+        "retryOnFail": true,
+        "maxTries": 3,
+        "waitBetweenTries": 2000
       },
       {
         "parameters": {
-          "jsCode": "// Evaluate admin role for /admin-unlink\n// n8n Variables not licensed on this instance — role ID is hardcoded here.\n// Role ID must be a STRING — Discord returns roles[] as strings; JS number literals\n// above Number.MAX_SAFE_INTEGER lose precision and will never match.\nconst AERYS_ADMIN_ROLE_ID = 'YOUR_ADMIN_ROLE_ID';\n\nconst member = $input.item.json;\nconst roles = member.roles || [];\nconst isAdmin = roles.includes(AERYS_ADMIN_ROLE_ID);\n\n// Carry forward the original interaction data from ParseInteraction\nconst interaction = $('ParseInteraction').item.json;\nreturn [{ json: { ...interaction, _guild_member: member, _is_admin: isAdmin } }];"
+          "jsCode": "// Evaluate admin role for /admin-unlink\n// n8n Variables not licensed on this instance \u2014 role ID is hardcoded here.\n// Role ID must be a STRING \u2014 Discord returns roles[] as strings; JS number literals\n// above Number.MAX_SAFE_INTEGER lose precision and will never match.\nconst AERYS_ADMIN_ROLE_ID = 'YOUR_ADMIN_ROLE_ID';\n\nconst member = $input.item.json;\nconst roles = member.roles || [];\nconst isAdmin = roles.includes(AERYS_ADMIN_ROLE_ID);\n\n// Carry forward the original interaction data from ParseInteraction\nconst interaction = $('ParseInteraction').item.json;\nreturn [{ json: { ...interaction, _guild_member: member, _is_admin: isAdmin } }];"
         },
         "id": "evaluate-role-unlink-01",
         "name": "Evaluate Role (unlink)",
@@ -5693,7 +5826,10 @@
           1168
         ],
         "notes": "Sends ephemeral unauthorized reply for non-admin users trying admin-unlink.",
-        "onError": "continueRegularOutput"
+        "onError": "continueRegularOutput",
+        "retryOnFail": true,
+        "maxTries": 3,
+        "waitBetweenTries": 2000
       },
       {
         "parameters": {
@@ -5779,7 +5915,10 @@
           1168
         ],
         "notes": "Ephemeral reply: identity not found for admin-unlink.",
-        "onError": "continueRegularOutput"
+        "onError": "continueRegularOutput",
+        "retryOnFail": true,
+        "maxTries": 3,
+        "waitBetweenTries": 2000
       },
       {
         "parameters": {
@@ -5833,7 +5972,10 @@
           1264
         ],
         "notes": "Ephemeral admin-only confirmation of force-unlink.",
-        "onError": "continueRegularOutput"
+        "onError": "continueRegularOutput",
+        "retryOnFail": true,
+        "maxTries": 3,
+        "waitBetweenTries": 2000
       },
       {
         "parameters": {
@@ -5857,7 +5999,7 @@
             "name": "Aerys DB (aerys)"
           }
         },
-        "notes": "Single query using COALESCE subqueries — ALWAYS returns 1 row with NULL for missing identities. Prevents empty-result workflow stop."
+        "notes": "Single query using COALESCE subqueries \u2014 ALWAYS returns 1 row with NULL for missing identities. Prevents empty-result workflow stop."
       },
       {
         "parameters": {
@@ -5874,7 +6016,7 @@
         "notes": "Processes 0-2 rows from Lookup Both Identities. Determines merge strategy: winner=Discord, loser=Telegram. Handles missing identities gracefully."
       },
       {
-        "id": "00000000-0000-0000-0000-000000000000",
+        "id": "67e9a577-546f-427d-a219-fe32699faa07",
         "name": "RespondDeferred",
         "type": "n8n-nodes-base.respondToWebhook",
         "typeVersion": 1.1,
@@ -6112,7 +6254,7 @@
           960
         ],
         "parameters": {
-          "jsCode": "const rows = $input.all().map(i => i.json);\nconst ctx = $('Merge person_id (memory)').first().json;\nconst realRows = rows.filter(r => r.core_id !== null && r.core_id !== undefined);\nif (realRows.length === 0) {\n  return [{ json: { ...ctx, reply: \"I don't have any stored memories about you yet.\" } }];\n}\nconst lines = realRows.map(r => {\n  const lock = r.locked ? ' 🔒' : '';\n  const status = r.status === 'provisional' ? ' *(provisional)*' : '';\n  // Strip timestamp suffix from user.stated.NNNN -> user.stated\n  const keyLabel = r.key_label.replace(/\\.\\d{10,}$/, '');\n  // Avoid double-prefix if claim_text already starts with key_label\n  const prefix = keyLabel + ': ';\n  const text = r.claim_text.startsWith(prefix) || r.claim_text.startsWith(r.key_label + ': ')\n    ? r.claim_text.replace(r.key_label + ': ', prefix)\n    : prefix + r.claim_text;\n  return '• ' + text + lock + status;\n});\nreturn [{ json: { ...ctx, reply: '**What I remember about you:**\\n' + lines.join('\\n') } }];"
+          "jsCode": "const rows = $input.all().map(i => i.json);\nconst ctx = $('Merge person_id (memory)').first().json;\nconst realRows = rows.filter(r => r.core_id !== null && r.core_id !== undefined);\nif (realRows.length === 0) {\n  return [{ json: { ...ctx, reply: \"I don't have any stored memories about you yet.\" } }];\n}\nconst lines = realRows.map(r => {\n  const lock = r.locked ? ' \ud83d\udd12' : '';\n  const status = r.status === 'provisional' ? ' *(provisional)*' : '';\n  // Strip timestamp suffix from user.stated.NNNN -> user.stated\n  const keyLabel = r.key_label.replace(/\\.\\d{10,}$/, '');\n  // Avoid double-prefix if claim_text already starts with key_label\n  const prefix = keyLabel + ': ';\n  const text = r.claim_text.startsWith(prefix) || r.claim_text.startsWith(r.key_label + ': ')\n    ? r.claim_text.replace(r.key_label + ': ', prefix)\n    : prefix + r.claim_text;\n  return '\u2022 ' + text + lock + status;\n});\nreturn [{ json: { ...ctx, reply: '**What I remember about you:**\\n' + lines.join('\\n') } }];"
         }
       },
       {
@@ -6149,7 +6291,10 @@
           "body": "={{ JSON.stringify({content: $json.reply, flags: 64}) }}",
           "contentType": "raw",
           "rawContentType": "application/json"
-        }
+        },
+        "retryOnFail": true,
+        "maxTries": 3,
+        "waitBetweenTries": 2000
       },
       {
         "id": "mem-pin-search-01",
@@ -6229,7 +6374,7 @@
         ],
         "parameters": {
           "method": "POST",
-          "url": "http://localhost:5678/webhook/aerys-override-api",
+          "url": "http://YOUR_AERYS_HOST_IP:5678/webhook/aerys-override-api",
           "sendHeaders": true,
           "headerParameters": {
             "parameters": [
@@ -6249,7 +6394,10 @@
               }
             }
           }
-        }
+        },
+        "retryOnFail": true,
+        "maxTries": 3,
+        "waitBetweenTries": 2000
       },
       {
         "id": "mem-pin-reply-01",
@@ -6261,7 +6409,7 @@
           1160
         ],
         "parameters": {
-          "jsCode": "const ctx = $('Merge person_id (memory)').first().json;\nconst found = $('Pin Search').first().json;\nreturn [{ json: { ...ctx, reply: 'Locked: **' + found.claim_text + '** — I won\\'t overwrite this.' } }];"
+          "jsCode": "const ctx = $('Merge person_id (memory)').first().json;\nconst found = $('Pin Search').first().json;\nreturn [{ json: { ...ctx, reply: 'Locked: **' + found.claim_text + '** \u2014 I won\\'t overwrite this.' } }];"
         }
       },
       {
@@ -6298,7 +6446,10 @@
           "body": "={{ JSON.stringify({content: $json.reply, flags: 64}) }}",
           "contentType": "raw",
           "rawContentType": "application/json"
-        }
+        },
+        "retryOnFail": true,
+        "maxTries": 3,
+        "waitBetweenTries": 2000
       },
       {
         "id": "mem-forget-search-01",
@@ -6422,7 +6573,7 @@
         ],
         "parameters": {
           "method": "POST",
-          "url": "http://localhost:5678/webhook/aerys-override-api",
+          "url": "http://YOUR_AERYS_HOST_IP:5678/webhook/aerys-override-api",
           "sendHeaders": true,
           "headerParameters": {
             "parameters": [
@@ -6442,7 +6593,10 @@
               }
             }
           }
-        }
+        },
+        "retryOnFail": true,
+        "maxTries": 3,
+        "waitBetweenTries": 2000
       },
       {
         "id": "mem-forget-reply-01",
@@ -6454,7 +6608,7 @@
           1420
         ],
         "parameters": {
-          "jsCode": "const ctx = $('Merge person_id (memory)').first().json;\nreturn [{ json: { ...ctx, reply: \"Done — I've retracted that memory.\" } }];"
+          "jsCode": "const ctx = $('Merge person_id (memory)').first().json;\nreturn [{ json: { ...ctx, reply: \"Done \u2014 I've retracted that memory.\" } }];"
         }
       },
       {
@@ -6491,7 +6645,10 @@
           "body": "={{ JSON.stringify({content: $json.reply, flags: 64}) }}",
           "contentType": "raw",
           "rawContentType": "application/json"
-        }
+        },
+        "retryOnFail": true,
+        "maxTries": 3,
+        "waitBetweenTries": 2000
       },
       {
         "id": "mem-correct-search-01",
@@ -6571,7 +6728,7 @@
         ],
         "parameters": {
           "method": "POST",
-          "url": "http://localhost:5678/webhook/aerys-override-api",
+          "url": "http://YOUR_AERYS_HOST_IP:5678/webhook/aerys-override-api",
           "sendHeaders": true,
           "headerParameters": {
             "parameters": [
@@ -6591,7 +6748,10 @@
               }
             }
           }
-        }
+        },
+        "retryOnFail": true,
+        "maxTries": 3,
+        "waitBetweenTries": 2000
       },
       {
         "id": "mem-correct-reply-01",
@@ -6603,7 +6763,7 @@
           1580
         ],
         "parameters": {
-          "jsCode": "const ctx = $('Merge person_id (memory)').first().json;\nreturn [{ json: { ...ctx, reply: \"Updated — I've noted the correction.\" } }];"
+          "jsCode": "const ctx = $('Merge person_id (memory)').first().json;\nreturn [{ json: { ...ctx, reply: \"Updated \u2014 I've noted the correction.\" } }];"
         }
       },
       {
@@ -6640,7 +6800,10 @@
           "body": "={{ JSON.stringify({content: $json.reply, flags: 64}) }}",
           "contentType": "raw",
           "rawContentType": "application/json"
-        }
+        },
+        "retryOnFail": true,
+        "maxTries": 3,
+        "waitBetweenTries": 2000
       },
       {
         "id": "mem-tell-api-01",
@@ -6653,7 +6816,7 @@
         ],
         "parameters": {
           "method": "POST",
-          "url": "http://localhost:5678/webhook/aerys-override-api",
+          "url": "http://YOUR_AERYS_HOST_IP:5678/webhook/aerys-override-api",
           "sendHeaders": true,
           "headerParameters": {
             "parameters": [
@@ -6673,7 +6836,10 @@
               }
             }
           }
-        }
+        },
+        "retryOnFail": true,
+        "maxTries": 3,
+        "waitBetweenTries": 2000
       },
       {
         "id": "mem-tell-reply-01",
@@ -6685,7 +6851,7 @@
           1720
         ],
         "parameters": {
-          "jsCode": "const ctx = $('Merge person_id (memory)').first().json;\nreturn [{ json: { ...ctx, reply: \"Got it — I've added that to what I know about you.\" } }];"
+          "jsCode": "const ctx = $('Merge person_id (memory)').first().json;\nreturn [{ json: { ...ctx, reply: \"Got it \u2014 I've added that to what I know about you.\" } }];"
         }
       },
       {
@@ -6722,7 +6888,10 @@
           "body": "={{ JSON.stringify({content: $json.reply, flags: 64}) }}",
           "contentType": "raw",
           "rawContentType": "application/json"
-        }
+        },
+        "retryOnFail": true,
+        "maxTries": 3,
+        "waitBetweenTries": 2000
       }
     ],
     "connections": {
@@ -7809,27 +7978,11 @@
         ]
       }
     },
-    "authors": "Your Name",
+    "authors": [],
     "name": null,
     "description": null,
     "autosaved": false,
-    "workflowPublishHistory": [
-      {
-        "createdAt": "2026-02-25T23:33:49.933Z",
-        "id": 667,
-        "workflowId": "YOUR_SLASH_COMMANDS_WORKFLOW_ID",
-        "versionId": "00000000-0000-0000-0000-000000000000",
-        "event": "deactivated",
-        "userId": "00000000-0000-0000-0000-000000000000"
-      },
-      {
-        "createdAt": "2026-02-25T23:33:50.083Z",
-        "id": 668,
-        "workflowId": "YOUR_SLASH_COMMANDS_WORKFLOW_ID",
-        "versionId": "00000000-0000-0000-0000-000000000000",
-        "event": "activated",
-        "userId": "00000000-0000-0000-0000-000000000000"
-      }
-    ]
+    "workflowPublishHistory": [],
+    "id": "00000000-0000-0000-0000-000000000000"
   }
 }

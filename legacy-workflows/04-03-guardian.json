@@ -1,0 +1,1057 @@
+{
+  "updatedAt": "2026-01-01T00:00:00.000Z",
+  "createdAt": "2026-01-01T00:00:00.000Z",
+  "id": "04-03-guardian",
+  "name": "04-03 Guardian",
+  "description": null,
+  "active": true,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 60
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "node-grd-sched-001",
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        100,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT pg_try_advisory_lock(hashtext('aerys_guardian')) AS lock_acquired;",
+        "options": {}
+      },
+      "id": "node-grd-lock-001",
+      "name": "Acquire Advisory Lock",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        300,
+        300
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "YOUR_POSTGRES_CREDENTIAL_ID",
+          "name": "Aerys DB (aerys)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.lock_acquired }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "node-grd-iflock-001",
+      "name": "Check Lock Acquired",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        500,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH aggregated AS (\n  SELECT\n    speaker_id,\n    key_label,\n    MAX(model_conf)         AS max_model_conf,\n    COUNT(*)                AS total_repeat_count,\n    MIN(first_seen)         AS first_seen_ts,\n    MAX(last_seen)          AS last_seen_ts,\n    EXTRACT(EPOCH FROM (MAX(last_seen) - MIN(first_seen))) / 86400 AS span_days,\n    MAX(CASE WHEN asserted_by = 'self' THEN 1 ELSE 0 END) AS has_self_assertion,\n    STRING_AGG(value_text, ' ||| ' ORDER BY last_seen DESC) AS all_values,\n    STRING_AGG(id::text, ',' ORDER BY last_seen DESC) AS row_ids\n  FROM userinfo\n  GROUP BY speaker_id, key_label\n),\nscored AS (\n  SELECT *,\n    LEAST(1.0,\n      0.70 * COALESCE(max_model_conf, 0.5)\n      + 0.20 * LEAST(1.0, LN(1 + total_repeat_count) / LN(4))\n      + CASE WHEN has_self_assertion = 1 THEN 0.20 ELSE 0.05 END\n      + CASE WHEN total_repeat_count > 2 THEN 0.10 ELSE 0.0 END\n    ) AS computed_confidence\n  FROM aggregated\n)\nSELECT scored.* FROM scored\nLEFT JOIN core_claim cc\n  ON cc.speaker_id = scored.speaker_id\n  AND cc.key_label = scored.key_label\n  WHERE cc.core_id IS NULL\n  AND (\n    (scored.has_self_assertion = 1 AND scored.computed_confidence >= 0.75)\n    OR\n    (scored.has_self_assertion = 0 AND scored.total_repeat_count >= 2 AND scored.computed_confidence >= 0.85 AND scored.span_days >= 7)\n  );",
+        "options": {}
+      },
+      "id": "node-grd-fetch-001",
+      "name": "Fetch Promotion Candidates",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        700,
+        200
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "YOUR_POSTGRES_CREDENTIAL_ID",
+          "name": "Aerys DB (aerys)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ Boolean($json.speaker_id) }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "node-grd-ifcand-001",
+      "name": "Check Has Candidates",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        900,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Group candidates that share the same speaker_id and have overlapping key_label prefixes\nconst candidates = $input.all().map(i => i.json);\nconst clusters = {};\ncandidates.forEach(c => {\n  const clusterKey = c.speaker_id + ':' + c.key_label.split('.')[0];\n  if (!clusters[clusterKey]) clusters[clusterKey] = [];\n  clusters[clusterKey].push(c);\n});\n\nreturn Object.values(clusters).map(group => ({\n  json: {\n    speaker_id: group[0].speaker_id,\n    cluster_key: group[0].key_label.split('.')[0],\n    candidates: group,\n    needs_llm_consolidation: group.length > 1\n  }\n}));",
+        "options": {}
+      },
+      "id": "node-grd-cluster-001",
+      "name": "Semantic Pre-cluster",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1100,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Process ALL clusters — output one item per cluster\n// Embed fallback data in every item so Parse LLM Output never needs back-references\nconst allClusters = $input.all().map(i => i.json);\n\nreturn allClusters.map(cluster => {\n  const c = cluster.candidates[0];\n  const fallbackText  = c.key_label + ': ' + (c.all_values || '').split(' ||| ')[0];\n  const fallbackConf  = parseFloat(c.computed_confidence) || 0.75;\n\n  if (!cluster.needs_llm_consolidation) {\n    return { json: {\n      speaker_id:  cluster.speaker_id,\n      key_label:   c.key_label,\n      claim_text:  fallbackText,\n      confidence:  fallbackConf,\n      _needs_llm:  false\n    }};\n  }\n\n  const body = {\n    model: 'anthropic/claude-haiku-4-5',\n    temperature: 0.0,\n    max_tokens: 400,\n    messages: [\n      {\n        role: 'system',\n        content: 'You are consolidating possibly-duplicate profile facts about the same person.\\nGiven a list of observed facts, merge duplicates and resolve contradictions.\\nReturn a JSON array of final claims: [{\"key_label\": \"...\", \"claim_text\": \"key: value\", \"confidence\": 0.0-1.0}]\\nIf facts contradict each other, keep the most recent with lower confidence.\\nNever return more claims than you received candidates.'\n      },\n      {\n        role: 'user',\n        content: 'Candidates to consolidate:\\n' + JSON.stringify(\n          cluster.candidates.map(c => ({ key: c.key_label, value: c.all_values })), null, 2\n        )\n      }\n    ]\n  };\n\n  return { json: {\n    body,\n    speaker_id:  cluster.speaker_id,\n    key_label:   c.key_label,\n    claim_text:  fallbackText,\n    confidence:  fallbackConf,\n    _needs_llm:  true\n  }};\n});",
+        "options": {},
+        "mode": "runOnceForAllItems"
+      },
+      "id": "node-grd-build-001",
+      "name": "Build Consolidation Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1300,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://openrouter.ai/api/v1/chat/completions",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "openRouterApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "HTTP-Referer",
+              "value": "http://localhost:5678"
+            },
+            {
+              "name": "X-Title",
+              "value": "Aerys Guardian"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.body) }}",
+        "options": {}
+      },
+      "id": "node-grd-llm-001",
+      "name": "LLM Consolidation",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1500,
+        200
+      ],
+      "credentials": {
+        "openRouterApi": {
+          "id": "YOUR_OPENROUTER_CREDENTIAL_ID",
+          "name": "OpenRouter (Aerys)"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "jsCode": "// Process LLM responses for multi-candidate clusters\n// HTTP Request node replaces item with response body — speaker_id is lost.\n// Recover original metadata by matching back to Build Consolidation Request items.\nconst responses = $input.all();\n\n// Get only the _needs_llm:true originals, in order — these map 1:1 to LLM responses\nconst llmOriginals = $('Build Consolidation Request').all()\n  .filter(item => item.json._needs_llm === true)\n  .map(item => item.json);\n\nconst results = [];\n\nfor (let i = 0; i < responses.length; i++) {\n  const item = responses[i].json;\n  const orig = llmOriginals[i] || {};\n\n  const speaker_id = orig.speaker_id;\n  const key_label  = orig.key_label;\n  const fallback   = orig.claim_text;\n  const fallbackConf = orig.confidence || 0.5;\n\n  // LLM error or no choices — use embedded fallback data\n  if (item.error || !item.choices) {\n    results.push({ json: { speaker_id, key_label, claim_text: fallback, confidence: fallbackConf }});\n    continue;\n  }\n\n  // Parse LLM JSON response\n  let pushed = false;\n  try {\n    const text = item.choices[0]?.message?.content || '[]';\n    const claims = JSON.parse(text);\n    if (Array.isArray(claims) && claims.length > 0) {\n      claims.forEach(c => results.push({ json: {\n        speaker_id,\n        key_label:  c.key_label,\n        claim_text: c.claim_text,\n        confidence: c.confidence || 0.75\n      }}));\n      pushed = true;\n    }\n  } catch(e) {}\n\n  if (!pushed) {\n    results.push({ json: { speaker_id, key_label, claim_text: fallback, confidence: fallbackConf }});\n  }\n}\n\nreturn results;",
+        "options": {},
+        "mode": "runOnceForAllItems"
+      },
+      "id": "node-grd-parse-001",
+      "name": "Parse LLM Output",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1700,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO core_claim (speaker_id, key_label, claim_text, status, confidence, visibility, last_seen)\nVALUES ($1::uuid, $2, $3, 'approved', $4, 'all', NOW())\nON CONFLICT (speaker_id, key_label) DO UPDATE SET\n  claim_text = CASE\n    WHEN core_claim.locked THEN core_claim.claim_text\n    ELSE EXCLUDED.claim_text\n  END,\n  confidence = EXCLUDED.confidence,\n  status = CASE\n    WHEN core_claim.locked THEN core_claim.status\n    ELSE 'approved'\n  END,\n  visibility = CASE\n    WHEN core_claim.locked THEN core_claim.visibility\n    ELSE 'all'\n  END,\n  last_seen = NOW();",
+        "options": {
+          "queryReplacement": "={{ [$json.speaker_id, $json.key_label, $json.claim_text, $json.confidence] }}"
+        }
+      },
+      "id": "node-grd-upsert-001",
+      "name": "Upsert to core_claim",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        1900,
+        200
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "YOUR_POSTGRES_CREDENTIAL_ID",
+          "name": "Aerys DB (aerys)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO audit_log (who, action, details)\nVALUES ('guardian', 'promote', $1::jsonb);",
+        "options": {
+          "queryReplacement": "={{ [JSON.stringify({ speaker_id: $json.speaker_id, key_label: $json.key_label, confidence: $json.confidence })] }}"
+        }
+      },
+      "id": "node-grd-audit-001",
+      "name": "Write Audit Log",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        2100,
+        200
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "YOUR_POSTGRES_CREDENTIAL_ID",
+          "name": "Aerys DB (aerys)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE core_claim\nSET status = 'proposed'\nWHERE status = 'provisional'\n  AND ttl_ts IS NOT NULL\n  AND ttl_ts < NOW();",
+        "options": {}
+      },
+      "id": "node-grd-ttl-001",
+      "name": "Handle TTL Expiry",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        2100,
+        400
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "YOUR_POSTGRES_CREDENTIAL_ID",
+          "name": "Aerys DB (aerys)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT pg_advisory_unlock(hashtext('aerys_guardian'));",
+        "options": {}
+      },
+      "id": "node-grd-unlock-001",
+      "name": "Release Advisory Lock",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        2300,
+        300
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "YOUR_POSTGRES_CREDENTIAL_ID",
+          "name": "Aerys DB (aerys)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ Boolean($json._needs_llm) }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "node-grd-route-llm",
+      "name": "Route: Needs LLM?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1500,
+        200
+      ]
+    }
+  ],
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Acquire Advisory Lock",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Acquire Advisory Lock": {
+      "main": [
+        [
+          {
+            "node": "Check Lock Acquired",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Lock Acquired": {
+      "main": [
+        [
+          {
+            "node": "Fetch Promotion Candidates",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Fetch Promotion Candidates": {
+      "main": [
+        [
+          {
+            "node": "Check Has Candidates",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Has Candidates": {
+      "main": [
+        [
+          {
+            "node": "Semantic Pre-cluster",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Handle TTL Expiry",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Semantic Pre-cluster": {
+      "main": [
+        [
+          {
+            "node": "Build Consolidation Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Consolidation Request": {
+      "main": [
+        [
+          {
+            "node": "Route: Needs LLM?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "LLM Consolidation": {
+      "main": [
+        [
+          {
+            "node": "Parse LLM Output",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse LLM Output": {
+      "main": [
+        [
+          {
+            "node": "Upsert to core_claim",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upsert to core_claim": {
+      "main": [
+        [
+          {
+            "node": "Write Audit Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Write Audit Log": {
+      "main": [
+        [
+          {
+            "node": "Handle TTL Expiry",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Handle TTL Expiry": {
+      "main": [
+        [
+          {
+            "node": "Release Advisory Lock",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route: Needs LLM?": {
+      "main": [
+        [
+          {
+            "node": "LLM Consolidation",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Upsert to core_claim",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false,
+    "errorWorkflow": "YOUR_ERROR_HANDLER_WORKFLOW_ID"
+  },
+  "staticData": {
+    "node:Schedule Trigger": {
+      "recurrenceRules": []
+    }
+  },
+  "meta": null,
+  "pinData": null,
+  "versionId": "00000000-0000-0000-0000-000000000000",
+  "activeVersionId": "00000000-0000-0000-0000-000000000000",
+  "versionCounter": 114,
+  "triggerCount": 1,
+  "shared": [
+    {
+      "updatedAt": "2026-02-25T00:25:34.984Z",
+      "createdAt": "2026-02-25T00:25:34.984Z",
+      "role": "workflow:owner",
+      "workflowId": "YOUR_GUARDIAN_WORKFLOW_ID",
+      "projectId": "YOUR_N8N_PROJECT_ID",
+      "project": {
+        "updatedAt": "2026-01-01T00:00:00.000Z",
+        "createdAt": "2026-01-01T00:00:00.000Z",
+        "id": "YOUR_N8N_PROJECT_ID",
+        "name": "Your Project",
+        "type": "personal",
+        "icon": null,
+        "description": null,
+        "creatorId": "00000000-0000-0000-0000-000000000000"
+      }
+    }
+  ],
+  "tags": [],
+  "activeVersion": {
+    "updatedAt": "2026-03-18T03:13:40.992Z",
+    "createdAt": "2026-03-18T03:13:40.992Z",
+    "versionId": "00000000-0000-0000-0000-000000000000",
+    "workflowId": "YOUR_GUARDIAN_WORKFLOW_ID",
+    "nodes": [
+      {
+        "parameters": {
+          "rule": {
+            "interval": [
+              {
+                "field": "minutes",
+                "minutesInterval": 60
+              }
+            ]
+          },
+          "options": {}
+        },
+        "id": "node-grd-sched-001",
+        "name": "Schedule Trigger",
+        "type": "n8n-nodes-base.scheduleTrigger",
+        "typeVersion": 1.2,
+        "position": [
+          100,
+          300
+        ]
+      },
+      {
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "SELECT pg_try_advisory_lock(hashtext('aerys_guardian')) AS lock_acquired;",
+          "options": {}
+        },
+        "id": "node-grd-lock-001",
+        "name": "Acquire Advisory Lock",
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.5,
+        "position": [
+          300,
+          300
+        ],
+        "credentials": {
+          "postgres": {
+            "id": "YOUR_POSTGRES_CREDENTIAL_ID",
+            "name": "Aerys DB (aerys)"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "loose"
+            },
+            "conditions": [
+              {
+                "leftValue": "={{ $json.lock_acquired }}",
+                "rightValue": true,
+                "operator": {
+                  "type": "boolean",
+                  "operation": "equals"
+                }
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        },
+        "id": "node-grd-iflock-001",
+        "name": "Check Lock Acquired",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.2,
+        "position": [
+          500,
+          300
+        ]
+      },
+      {
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "WITH aggregated AS (\n  SELECT\n    speaker_id,\n    key_label,\n    MAX(model_conf)         AS max_model_conf,\n    COUNT(*)                AS total_repeat_count,\n    MIN(first_seen)         AS first_seen_ts,\n    MAX(last_seen)          AS last_seen_ts,\n    EXTRACT(EPOCH FROM (MAX(last_seen) - MIN(first_seen))) / 86400 AS span_days,\n    MAX(CASE WHEN asserted_by = 'self' THEN 1 ELSE 0 END) AS has_self_assertion,\n    STRING_AGG(value_text, ' ||| ' ORDER BY last_seen DESC) AS all_values,\n    STRING_AGG(id::text, ',' ORDER BY last_seen DESC) AS row_ids\n  FROM userinfo\n  GROUP BY speaker_id, key_label\n),\nscored AS (\n  SELECT *,\n    LEAST(1.0,\n      0.70 * COALESCE(max_model_conf, 0.5)\n      + 0.20 * LEAST(1.0, LN(1 + total_repeat_count) / LN(4))\n      + CASE WHEN has_self_assertion = 1 THEN 0.20 ELSE 0.05 END\n      + CASE WHEN total_repeat_count > 2 THEN 0.10 ELSE 0.0 END\n    ) AS computed_confidence\n  FROM aggregated\n)\nSELECT scored.* FROM scored\nLEFT JOIN core_claim cc\n  ON cc.speaker_id = scored.speaker_id\n  AND cc.key_label = scored.key_label\n  WHERE cc.core_id IS NULL\n  AND (\n    (scored.has_self_assertion = 1 AND scored.computed_confidence >= 0.75)\n    OR\n    (scored.has_self_assertion = 0 AND scored.total_repeat_count >= 2 AND scored.computed_confidence >= 0.85 AND scored.span_days >= 7)\n  );",
+          "options": {}
+        },
+        "id": "node-grd-fetch-001",
+        "name": "Fetch Promotion Candidates",
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.5,
+        "position": [
+          700,
+          200
+        ],
+        "credentials": {
+          "postgres": {
+            "id": "YOUR_POSTGRES_CREDENTIAL_ID",
+            "name": "Aerys DB (aerys)"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "loose"
+            },
+            "conditions": [
+              {
+                "leftValue": "={{ Boolean($json.speaker_id) }}",
+                "rightValue": true,
+                "operator": {
+                  "type": "boolean",
+                  "operation": "equals"
+                }
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        },
+        "id": "node-grd-ifcand-001",
+        "name": "Check Has Candidates",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.2,
+        "position": [
+          900,
+          200
+        ]
+      },
+      {
+        "parameters": {
+          "jsCode": "// Group candidates that share the same speaker_id and have overlapping key_label prefixes\nconst candidates = $input.all().map(i => i.json);\nconst clusters = {};\ncandidates.forEach(c => {\n  const clusterKey = c.speaker_id + ':' + c.key_label.split('.')[0];\n  if (!clusters[clusterKey]) clusters[clusterKey] = [];\n  clusters[clusterKey].push(c);\n});\n\nreturn Object.values(clusters).map(group => ({\n  json: {\n    speaker_id: group[0].speaker_id,\n    cluster_key: group[0].key_label.split('.')[0],\n    candidates: group,\n    needs_llm_consolidation: group.length > 1\n  }\n}));",
+          "options": {}
+        },
+        "id": "node-grd-cluster-001",
+        "name": "Semantic Pre-cluster",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1100,
+          200
+        ]
+      },
+      {
+        "parameters": {
+          "jsCode": "// Process ALL clusters — output one item per cluster\n// Embed fallback data in every item so Parse LLM Output never needs back-references\nconst allClusters = $input.all().map(i => i.json);\n\nreturn allClusters.map(cluster => {\n  const c = cluster.candidates[0];\n  const fallbackText  = c.key_label + ': ' + (c.all_values || '').split(' ||| ')[0];\n  const fallbackConf  = parseFloat(c.computed_confidence) || 0.75;\n\n  if (!cluster.needs_llm_consolidation) {\n    return { json: {\n      speaker_id:  cluster.speaker_id,\n      key_label:   c.key_label,\n      claim_text:  fallbackText,\n      confidence:  fallbackConf,\n      _needs_llm:  false\n    }};\n  }\n\n  const body = {\n    model: 'anthropic/claude-haiku-4-5',\n    temperature: 0.0,\n    max_tokens: 400,\n    messages: [\n      {\n        role: 'system',\n        content: 'You are consolidating possibly-duplicate profile facts about the same person.\\nGiven a list of observed facts, merge duplicates and resolve contradictions.\\nReturn a JSON array of final claims: [{\"key_label\": \"...\", \"claim_text\": \"key: value\", \"confidence\": 0.0-1.0}]\\nIf facts contradict each other, keep the most recent with lower confidence.\\nNever return more claims than you received candidates.'\n      },\n      {\n        role: 'user',\n        content: 'Candidates to consolidate:\\n' + JSON.stringify(\n          cluster.candidates.map(c => ({ key: c.key_label, value: c.all_values })), null, 2\n        )\n      }\n    ]\n  };\n\n  return { json: {\n    body,\n    speaker_id:  cluster.speaker_id,\n    key_label:   c.key_label,\n    claim_text:  fallbackText,\n    confidence:  fallbackConf,\n    _needs_llm:  true\n  }};\n});",
+          "options": {},
+          "mode": "runOnceForAllItems"
+        },
+        "id": "node-grd-build-001",
+        "name": "Build Consolidation Request",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1300,
+          200
+        ]
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "https://openrouter.ai/api/v1/chat/completions",
+          "authentication": "predefinedCredentialType",
+          "nodeCredentialType": "openRouterApi",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "HTTP-Referer",
+                "value": "http://localhost:5678"
+              },
+              {
+                "name": "X-Title",
+                "value": "Aerys Guardian"
+              }
+            ]
+          },
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={{ JSON.stringify($json.body) }}",
+          "options": {}
+        },
+        "id": "node-grd-llm-001",
+        "name": "LLM Consolidation",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          1500,
+          200
+        ],
+        "credentials": {
+          "openRouterApi": {
+            "id": "YOUR_OPENROUTER_CREDENTIAL_ID",
+            "name": "OpenRouter (Aerys)"
+          }
+        },
+        "retryOnFail": true,
+        "maxTries": 3,
+        "waitBetweenTries": 2000
+      },
+      {
+        "parameters": {
+          "jsCode": "// Process LLM responses for multi-candidate clusters\n// HTTP Request node replaces item with response body — speaker_id is lost.\n// Recover original metadata by matching back to Build Consolidation Request items.\nconst responses = $input.all();\n\n// Get only the _needs_llm:true originals, in order — these map 1:1 to LLM responses\nconst llmOriginals = $('Build Consolidation Request').all()\n  .filter(item => item.json._needs_llm === true)\n  .map(item => item.json);\n\nconst results = [];\n\nfor (let i = 0; i < responses.length; i++) {\n  const item = responses[i].json;\n  const orig = llmOriginals[i] || {};\n\n  const speaker_id = orig.speaker_id;\n  const key_label  = orig.key_label;\n  const fallback   = orig.claim_text;\n  const fallbackConf = orig.confidence || 0.5;\n\n  // LLM error or no choices — use embedded fallback data\n  if (item.error || !item.choices) {\n    results.push({ json: { speaker_id, key_label, claim_text: fallback, confidence: fallbackConf }});\n    continue;\n  }\n\n  // Parse LLM JSON response\n  let pushed = false;\n  try {\n    const text = item.choices[0]?.message?.content || '[]';\n    const claims = JSON.parse(text);\n    if (Array.isArray(claims) && claims.length > 0) {\n      claims.forEach(c => results.push({ json: {\n        speaker_id,\n        key_label:  c.key_label,\n        claim_text: c.claim_text,\n        confidence: c.confidence || 0.75\n      }}));\n      pushed = true;\n    }\n  } catch(e) {}\n\n  if (!pushed) {\n    results.push({ json: { speaker_id, key_label, claim_text: fallback, confidence: fallbackConf }});\n  }\n}\n\nreturn results;",
+          "options": {},
+          "mode": "runOnceForAllItems"
+        },
+        "id": "node-grd-parse-001",
+        "name": "Parse LLM Output",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1700,
+          200
+        ]
+      },
+      {
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "INSERT INTO core_claim (speaker_id, key_label, claim_text, status, confidence, visibility, last_seen)\nVALUES ($1::uuid, $2, $3, 'approved', $4, 'all', NOW())\nON CONFLICT (speaker_id, key_label) DO UPDATE SET\n  claim_text = CASE\n    WHEN core_claim.locked THEN core_claim.claim_text\n    ELSE EXCLUDED.claim_text\n  END,\n  confidence = EXCLUDED.confidence,\n  status = CASE\n    WHEN core_claim.locked THEN core_claim.status\n    ELSE 'approved'\n  END,\n  visibility = CASE\n    WHEN core_claim.locked THEN core_claim.visibility\n    ELSE 'all'\n  END,\n  last_seen = NOW();",
+          "options": {
+            "queryReplacement": "={{ [$json.speaker_id, $json.key_label, $json.claim_text, $json.confidence] }}"
+          }
+        },
+        "id": "node-grd-upsert-001",
+        "name": "Upsert to core_claim",
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.5,
+        "position": [
+          1900,
+          200
+        ],
+        "credentials": {
+          "postgres": {
+            "id": "YOUR_POSTGRES_CREDENTIAL_ID",
+            "name": "Aerys DB (aerys)"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "INSERT INTO audit_log (who, action, details)\nVALUES ('guardian', 'promote', $1::jsonb);",
+          "options": {
+            "queryReplacement": "={{ [JSON.stringify({ speaker_id: $json.speaker_id, key_label: $json.key_label, confidence: $json.confidence })] }}"
+          }
+        },
+        "id": "node-grd-audit-001",
+        "name": "Write Audit Log",
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.5,
+        "position": [
+          2100,
+          200
+        ],
+        "credentials": {
+          "postgres": {
+            "id": "YOUR_POSTGRES_CREDENTIAL_ID",
+            "name": "Aerys DB (aerys)"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "UPDATE core_claim\nSET status = 'proposed'\nWHERE status = 'provisional'\n  AND ttl_ts IS NOT NULL\n  AND ttl_ts < NOW();",
+          "options": {}
+        },
+        "id": "node-grd-ttl-001",
+        "name": "Handle TTL Expiry",
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.5,
+        "position": [
+          2100,
+          400
+        ],
+        "credentials": {
+          "postgres": {
+            "id": "YOUR_POSTGRES_CREDENTIAL_ID",
+            "name": "Aerys DB (aerys)"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "SELECT pg_advisory_unlock(hashtext('aerys_guardian'));",
+          "options": {}
+        },
+        "id": "node-grd-unlock-001",
+        "name": "Release Advisory Lock",
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.5,
+        "position": [
+          2300,
+          300
+        ],
+        "credentials": {
+          "postgres": {
+            "id": "YOUR_POSTGRES_CREDENTIAL_ID",
+            "name": "Aerys DB (aerys)"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "loose"
+            },
+            "conditions": [
+              {
+                "leftValue": "={{ Boolean($json._needs_llm) }}",
+                "rightValue": true,
+                "operator": {
+                  "type": "boolean",
+                  "operation": "equals"
+                }
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        },
+        "id": "node-grd-route-llm",
+        "name": "Route: Needs LLM?",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.2,
+        "position": [
+          1500,
+          200
+        ]
+      }
+    ],
+    "connections": {
+      "Schedule Trigger": {
+        "main": [
+          [
+            {
+              "node": "Acquire Advisory Lock",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Acquire Advisory Lock": {
+        "main": [
+          [
+            {
+              "node": "Check Lock Acquired",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Check Lock Acquired": {
+        "main": [
+          [
+            {
+              "node": "Fetch Promotion Candidates",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          []
+        ]
+      },
+      "Fetch Promotion Candidates": {
+        "main": [
+          [
+            {
+              "node": "Check Has Candidates",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Check Has Candidates": {
+        "main": [
+          [
+            {
+              "node": "Semantic Pre-cluster",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Handle TTL Expiry",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Semantic Pre-cluster": {
+        "main": [
+          [
+            {
+              "node": "Build Consolidation Request",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Build Consolidation Request": {
+        "main": [
+          [
+            {
+              "node": "Route: Needs LLM?",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "LLM Consolidation": {
+        "main": [
+          [
+            {
+              "node": "Parse LLM Output",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Parse LLM Output": {
+        "main": [
+          [
+            {
+              "node": "Upsert to core_claim",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Upsert to core_claim": {
+        "main": [
+          [
+            {
+              "node": "Write Audit Log",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Write Audit Log": {
+        "main": [
+          [
+            {
+              "node": "Handle TTL Expiry",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Handle TTL Expiry": {
+        "main": [
+          [
+            {
+              "node": "Release Advisory Lock",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Route: Needs LLM?": {
+        "main": [
+          [
+            {
+              "node": "LLM Consolidation",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Upsert to core_claim",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "authors": "Your Name",
+    "name": null,
+    "description": null,
+    "autosaved": false,
+    "workflowPublishHistory": [
+      {
+        "createdAt": "2026-03-18T03:13:41.206Z",
+        "id": 1303,
+        "workflowId": "YOUR_GUARDIAN_WORKFLOW_ID",
+        "versionId": "00000000-0000-0000-0000-000000000000",
+        "event": "deactivated",
+        "userId": "00000000-0000-0000-0000-000000000000"
+      },
+      {
+        "createdAt": "2026-03-18T03:13:41.281Z",
+        "id": 1304,
+        "workflowId": "YOUR_GUARDIAN_WORKFLOW_ID",
+        "versionId": "00000000-0000-0000-0000-000000000000",
+        "event": "activated",
+        "userId": "00000000-0000-0000-0000-000000000000"
+      }
+    ]
+  }
+}

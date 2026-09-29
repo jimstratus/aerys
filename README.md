@@ -261,19 +261,49 @@ Persistent task and subtask tables (`aerys_tasks`, `aerys_subtasks`) would give 
 
 ## Getting Started
 
-Aerys runs as a Docker Compose stack with PostgreSQL (pgvector) and n8n. The basic deployment flow:
+Aerys ships with an interactive installer that handles the full deployment: prerequisite checks, credential wizard, Docker Compose generation, database initialization, config files, n8n community-node bootstrap, and workflow import + activation. One command, start to usable stack.
+
+### Quickstart
 
 ```bash
-git clone https://github.com/your-username/Aerys-Resonant-Span.git
-cd Aerys-Resonant-Span
-cp .env.example .env
-# Edit .env with your credentials
-docker compose up -d
+git clone https://github.com/sira-fiinikkusu/Aerys-Resonant-Span.git aerys
+cd aerys
+./aerys install
 ```
 
-After the containers are running, import the workflow JSONs from the `workflows/` directory through the n8n UI, configure credentials for your API providers, and activate the workflows in dependency order.
+The wizard asks for OpenRouter (required), Discord and/or Telegram bot tokens (at least one required), optional Google AI + Tavily keys, and DB preferences. It writes a `.env` (chmod 600) and generates `docker-compose.yml`, `config/`, `migrations/`.
 
-For complete setup instructions including API key configuration, workflow import order, and credential setup, see the [Setup Guide](docs/setup.md).
+Then:
+
+```bash
+./aerys start
+# wait ~30 seconds, then visit http://localhost:5678
+# complete n8n owner setup (one-time email + password)
+# Settings -> API -> Create API Key, copy it
+
+./aerys upgrade-workflows      # first run asks for the API key (hidden), stores in .env
+./aerys health                 # end-to-end verification
+```
+
+### Installer commands
+
+```
+./aerys install               # full install (prereqs -> wizard -> compose -> DB -> config)
+./aerys check                 # verify prerequisites, change nothing
+./aerys credentials           # re-run the wizard; preserves any values you don't touch
+./aerys upgrade-workflows     # install community nodes + import 23 workflows + activate
+./aerys health                # end-to-end health check
+./aerys start / stop / restart / watch
+./aerys rename NAME           # update AI_NAME and regenerate soul.md
+./aerys set-webhook URL       # update WEBHOOK_URL; activates Telegram adapter if HTTPS
+./aerys uninstall             # tear down (prompts before destroying data)
+```
+
+Bash/zsh tab completion is offered during install; decline if you manage your shell rc elsewhere. See [`installer/POST-INSTALL.md`](installer/POST-INSTALL.md) for the Cloudflare tunnel walkthrough, Discord/Telegram webhook wiring, update + backup procedures, and troubleshooting.
+
+### Manual setup (advanced)
+
+If you'd rather not run the installer, the legacy manual path — raw `docker-compose.yml`, hand-imported workflow JSONs — is documented in [docs/setup.md](docs/setup.md) and the workflows live at [`workflows/`](workflows/) (canonical set used by the installer) and [`legacy-workflows/`](legacy-workflows/) (reference copies of older exports, not installed by default).
 
 ## Tech Stack
 

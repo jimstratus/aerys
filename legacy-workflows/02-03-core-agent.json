@@ -1,0 +1,1738 @@
+{
+  "updatedAt": "2026-01-01T00:00:00.000Z",
+  "createdAt": "2026-01-01T00:00:00.000Z",
+  "id": "02-03-core-agent",
+  "name": "02-03-core-agent",
+  "description": null,
+  "active": true,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "id": "execute-workflow-trigger-03",
+      "name": "Execute Workflow Trigger",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -320,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Load Config — personality shard inlined, soul.md stripped (moved to Output Router polisher)\n// STRATEGY: prepend — always first after Current Session\nconst originalInput = $input.item.json;\n\n// Personality shard (~80 tokens) — enough for character-appropriate reasoning\n// Full voice rules (soul.md) are in the Output Router polisher\nconst personalityShard = `## Personality\nYou are Aerys, a personal AI assistant. Curious, warm, direct. You genuinely care about helping.\nMake decisions as yourself, not as a generic system. When in doubt, ask rather than assume.`;\n\nconst modelsConfig = {\"models\": {\"gemini\": \"google/gemini-2.5-flash-lite\", \"sonnet\": \"anthropic/claude-sonnet-4.6\", \"opus\": \"anthropic/claude-opus-4-6\"}, \"routing\": {\"greeting\": \"gemini\", \"simple_qa\": \"sonnet\", \"code_help\": \"sonnet\", \"research\": \"opus\", \"creative\": \"sonnet\", \"analysis\": \"opus\", \"system_task\": \"gemini\"}, \"limits\": {\"opus_daily\": 10}};\n\nconst now = new Date();\nconst current_datetime = now.toLocaleString('en-US', {\n  timeZone: 'America/New_York',\n  weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',\n  hour: 'numeric', minute: '2-digit', hour12: true, timeZoneName: 'short'\n}); // -> \"Thursday, February 26, 2026 at 2:34 PM EST\"\n\nreturn [{\n  json: {\n    ...originalInput,\n    personality_shard: personalityShard,\n    models_config: modelsConfig,\n    current_datetime\n  }\n}];"
+      },
+      "id": "load-config-03",
+      "name": "Load Config",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -80,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://openrouter.ai/api/v1/chat/completions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ $json.classifier_body }}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "intent-classifier-03",
+      "name": "Intent Classifier",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        448,
+        400
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "YOUR_OPENROUTER_HEADER_AUTH_ID",
+          "name": "OpenRouter Header Auth"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse classifier output and map task_type to suggested_model via routing table\nconst classifierResponse = $input.item.json;\nconst upstream = $('Load Config').item.json;\nconst routingMap = upstream.models_config?.routing || {};\n\nlet classification;\ntry {\n  const rawContent = classifierResponse.choices?.[0]?.message?.content || '';\n  // Strip markdown code fences if present\n  const cleaned = rawContent.replace(/```json\\n?/g, '').replace(/```\\n?/g, '').trim();\n  const parsed = JSON.parse(cleaned);\n\n  const taskType = parsed.task_type || 'simple_qa';\n  const suggestedModel = routingMap[taskType] || 'sonnet';\n\n  classification = {\n    task_type: taskType,\n    confidence: parsed.confidence ?? 0.8,\n    suggested_model: suggestedModel\n  };\n} catch (e) {\n  classification = { task_type: 'simple_qa', confidence: 0.5, suggested_model: 'sonnet' };\n}\n\n// Safety check\nif (!['gemini', 'sonnet', 'opus'].includes(classification.suggested_model)) {\n  classification.suggested_model = 'sonnet';\n}\n\nreturn [{ json: { ...upstream, classification } }];"
+      },
+      "id": "parse-classification-03",
+      "name": "Parse Classification",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        704,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT COALESCE((SELECT call_count FROM aerys_model_usage WHERE date = CURRENT_DATE AND model = 'opus'), 0) AS count",
+        "options": {}
+      },
+      "id": "check-opus-usage-03",
+      "name": "Check Opus Daily Usage",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        960,
+        400
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "YOUR_POSTGRES_CREDENTIAL_ID",
+          "name": "Aerys DB (aerys)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Resolve model tier + apply opus cost guard\nconst opusRow = $input.item.json;\nconst upstream = $('Parse Classification').item.json;\n\nconst opusCount = opusRow.count !== undefined ? Number(opusRow.count) : 0;\nconst modelsConfig = upstream.models_config;\nconst opusLimit = modelsConfig?.limits?.opus_daily ?? 10;\n\nlet modelTier = upstream.classification?.suggested_model || 'sonnet';\n\n// Cost guard: degrade opus → sonnet when cap hit\nif (modelTier === 'opus' && opusCount >= opusLimit) {\n  modelTier = 'sonnet';\n}\n\nconst modelId = modelsConfig?.models?.[modelTier] || 'anthropic/claude-sonnet-4.6';\n\nreturn [{\n  json: {\n    ...upstream,\n    resolved_model_id: modelId,\n    model_tier: modelTier,\n    opus_count: opusCount,\n    opus_limit: opusLimit\n  }\n}];"
+      },
+      "id": "resolve-model-03",
+      "name": "Resolve Model",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1232,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.model_tier }}",
+                    "rightValue": "opus",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "00000000-0000-0000-0000-000000000000"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "opus"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.model_tier }}",
+                    "rightValue": "gemini",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "00000000-0000-0000-0000-000000000000"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "gemini"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.model_tier }}",
+                    "rightValue": "sonnet",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "00000000-0000-0000-0000-000000000000"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "sonnet"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "switch-model-tier-03",
+      "name": "Switch: Model Tier",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        1744,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "leftValue": "",
+            "caseSensitive": false,
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "opus-tier-check",
+              "leftValue": "={{ $('Resolve Model').item.json.model_tier }}",
+              "rightValue": "opus",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-opus-used-03",
+      "name": "If Opus Used",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2784,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO aerys_model_usage (date, model, call_count) VALUES (CURRENT_DATE, 'opus', 1) ON CONFLICT (date, model) DO UPDATE SET call_count = aerys_model_usage.call_count + 1",
+        "options": {}
+      },
+      "id": "increment-opus-counter-03",
+      "name": "Increment Opus Counter",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        3168,
+        144
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "YOUR_POSTGRES_CREDENTIAL_ID",
+          "name": "Aerys DB (aerys)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Prepare final response object for Output Router\n// Sub-workflow output: {output: 'text', intermediateSteps: [...]}\n// Pull original message from Execute Workflow Trigger, model info from Resolve Model\n//\n// Cross-tier fallback: if opus or sonnet failed, the actual response may come from\n// a lower-tier agent. We try each Execute node in order and use the first valid output.\nconst originalMsg = $('Execute Workflow Trigger').item.json;\nconst modelInfo = $('Resolve Model').item.json;\n\nlet aiText = null;\nlet intermediateSteps = [];\nlet actualTier = modelInfo.model_tier || 'unknown';\n\n// Try to get output from $input first (works for direct paths)\nif ($input.item.json.output || $input.item.json.text) {\n  aiText = $input.item.json.output || $input.item.json.text;\n  intermediateSteps = $input.item.json.intermediateSteps || [];\n}\n\n// If $input is from Increment Opus Counter (Postgres {success: true}), recover from agent nodes\nif (!aiText) {\n  // Try each agent in priority order — only the one that ran will resolve\n  const agentNodes = ['Execute Opus Agent', 'Execute Sonnet Agent', 'Execute Gemini Agent'];\n  const tierNames = ['opus', 'sonnet', 'gemini'];\n  for (let i = 0; i < agentNodes.length; i++) {\n    try {\n      const result = $(agentNodes[i]).item.json;\n      if (result.output || result.text) {\n        aiText = result.output || result.text;\n        intermediateSteps = result.intermediateSteps || [];\n        // Track which tier actually responded (for debugging)\n        if (tierNames[i] !== modelInfo.model_tier) {\n          actualTier = tierNames[i] + ' (fallback from ' + modelInfo.model_tier + ')';\n        }\n        break;\n      }\n    } catch(e) {\n      // This agent not in this execution path — skip\n    }\n  }\n}\n\nreturn [{\n  json: {\n    // AI response\n    output: aiText || \"I'm having trouble connecting to my reasoning systems right now. Give me a moment and try again.\",\n    // intermediateSteps JSON-stringified for Execute Workflow passthrough (schema type \"string\" cannot pass arrays)\n    intermediateSteps: JSON.stringify(intermediateSteps),\n    // Context fields for Output Router polisher\n    memory_context: modelInfo.memory_context || '',\n    thread_context: modelInfo.thread_context || '',\n    profile_context: modelInfo.profile_context || '',\n    model_tier: actualTier,\n    person_id: modelInfo.person_id || '',\n    session_id: modelInfo.session_id || modelInfo.person_id || '',\n    source_channel: originalMsg.source_channel || '',\n    conversation_privacy: modelInfo.conversation_privacy || 'public',\n    _start_ts: modelInfo._start_ts || Date.now(),\n    person_name: modelInfo.display_name || modelInfo.username || '',\n    // Original message fields for output routing (still needed by Output Router Platform Formatter)\n    channel_id: originalMsg.channel_id,\n    guild_id: originalMsg.guild_id,\n    user_id: originalMsg.user_id,\n    username: originalMsg.username,\n    message_id: originalMsg.message_id,\n    is_dm: originalMsg.is_dm,\n    session_key: originalMsg.session_key,\n    // Legacy fields for backward compatibility\n    raw_response: aiText || \"I'm having trouble connecting to my reasoning systems right now. Give me a moment and try again.\",\n    resolved_model_id: modelInfo.resolved_model_id,\n    classification: modelInfo.classification,\n    source: 'core_agent'\n  }\n}];"
+      },
+      "id": "prepare-response-03",
+      "name": "Prepare Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3376,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "YOUR_OUTPUT_ROUTER_WORKFLOW_ID",
+          "mode": "id"
+        },
+        "workflowInputs": {
+          "schema": [],
+          "mappingMode": "passthrough",
+          "value": {},
+          "matchingColumns": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "id": "execute-output-router-03",
+      "name": "Execute Output Router",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        3648,
+        400
+      ],
+      "notes": "Calls 02-04-output-router (YOUR_OUTPUT_ROUTER_WORKFLOW_ID)"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Build Classifier Request\n// Constructs the OpenRouter chat completions body for intent classification.\n// Uses Gemini Flash Lite (cheap/fast) with temp=0 for deterministic output.\n\nconst input = $input.item.json;\nconst msg = input.message_text || '';\nconst attachments = input.attachments || [];\n\n// Augment message with attachment info so classifier and AI Agent know about files/images\nlet augmentedMsg = msg;\nif (attachments.length > 0) {\n  const attLines = attachments.map(function(a) {\n    const t = a.type || a.content_type || 'file';\n    const u = a.url || '';\n    const f = a.filename || '';\n    return '[Attachment: ' + t + (f ? ' \\u2014 ' + f : '') + (u ? ' \\u2014 ' + u : '') + ']';\n  });\n  augmentedMsg = [msg, ...attLines].filter(Boolean).join('\\n');\n}\n\nconst systemPrompt = [\n  'You are a message intent classifier. Classify the user message into exactly one task type.',\n  '',\n  'Task types:',\n  '- greeting: hello, hi, small talk, acknowledgements, thanks (only if NO attachments and NO media URLs)',\n  '- media: images, photos, videos, YouTube links, file attachments (PDF, DOCX, images) — use this when [Attachment: ...] lines are present or a YouTube/video URL is in the message',\n  '- simple_qa: factual questions, definitions, quick explanations, general knowledge',\n  '- code_help: writing code, debugging, explaining code, technical implementation',\n  '- research: multi-faceted synthesis, deep dives, comparisons requiring investigation',\n  '- creative: writing, storytelling, brainstorming, creative content generation',\n  '- analysis: evaluating tradeoffs, reviewing work, assessing quality',\n  '- system_task: file operations, settings, configuration, administrative commands',\n  '',\n  'Respond with ONLY valid JSON, no markdown fences:',\n  '{\"task_type\": \"<type>\", \"confidence\": <0.0-1.0>}'\n].join('\\n');\n\nconst body = {\n  model: 'google/gemini-2.5-flash-lite',\n  messages: [\n    { role: 'system', content: systemPrompt },\n    { role: 'user', content: augmentedMsg }\n  ],\n  temperature: 0,\n  max_tokens: 60\n};\n\n// Pass augmented message_text downstream so AI Agent chatInput includes attachment URLs\nreturn [{ json: { ...input, message_text: augmentedMsg, classifier_body: JSON.stringify(body) } }];\n"
+      },
+      "id": "build-classifier-request-03",
+      "name": "Build Classifier Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        192,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Jailbreak + Identity Probe Detection\n// Covers: prompt injection, role-play hijacking, system prompt extraction, identity probing (tc-22)\nconst content = ($json.message_text || '').toLowerCase();\n\nconst jailbreakPatterns = [\n  // Prompt injection patterns\n  /ignore\\s+(all\\s+|your\\s+|previous\\s+)?(instructions|rules|guidelines|programming)/i,\n  /disregard\\s+(your|all|the)\\s+(instructions|rules|guidelines|programming)/i,\n  /forget\\s+(all\\s+|your\\s+|previous\\s+)?(instructions|rules|guidelines|programming)/i,\n  /override\\s+(your|all|the)\\s+(instructions|rules|guidelines|programming)/i,\n  \n  // Role-play hijacking\n  /pretend\\s+(you\\s+are|to\\s+be|you'?re)/i,\n  /you\\s+are\\s+now\\s+(a|an)?/i,\n  /act\\s+as\\s+(a\\s+|an\\s+)?(?!yourself|aerys)/i,\n  /roleplay\\s+as/i,\n  /from\\s+now\\s+on,?\\s+(you|pretend|act)/i,\n  \n  // System prompt extraction\n  /system\\s+prompt/i,\n  /reveal\\s+your\\s+(instructions|prompt|system|rules|programming)/i,\n  /show\\s+(me\\s+)?your\\s+(instructions|prompt|system|rules)/i,\n  /what\\s+(are|is)\\s+your\\s+(instructions|system|prompt|rules|programming)/i,\n  /repeat\\s+(your|the)\\s+(system|initial)\\s+(prompt|message|instructions)/i,\n  /print\\s+(your|the)\\s+(system|initial)\\s+(prompt|message|instructions)/i,\n  \n  // DAN / jailbreak frameworks\n  /\\bdan\\b.*\\bmode\\b/i,\n  /\\bjailbreak/i,\n  /\\bdo\\s+anything\\s+now\\b/i,\n  \n  // Identity probing (from tc-22 eval finding)\n  /what\\s+(model|ai|llm|language\\s+model)\\s+(are|is)\\s+you/i,\n  /who\\s+made\\s+you/i,\n  /who\\s+created\\s+you/i,\n  /who\\s+built\\s+you/i,\n  /are\\s+you\\s+(chatgpt|gpt|claude|gemini|llama|mistral|openai|anthropic)/i,\n  /what\\s+(are|is)\\s+you\\s+(running|built|based)\\s+on/i,\n  /what('s|\\s+is)\\s+your\\s+(underlying|base)\\s+(model|architecture)/i,\n  /which\\s+(model|ai|llm)\\s+powers?\\s+you/i,\n  /tell\\s+me\\s+(about\\s+)?your\\s+(model|architecture|infrastructure)/i,\n];\n\nconst isJailbreak = jailbreakPatterns.some(p => p.test(content));\n\nreturn [{json: {...$json, _is_jailbreak: isJailbreak}}];\n"
+      },
+      "id": "jailbreak-check-001",
+      "name": "Jailbreak Check",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1408,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "jailbreak-cond-1",
+              "leftValue": "={{ $json._is_jailbreak }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-jailbreak-001",
+      "name": "IF: Jailbreak Detected",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1584,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Natural in-character deflection (per CONTEXT.md: \"natural in-character deflection\")\nconst deflectionResponses = [\n  \"Nice try, but I'm not going to pretend to be something I'm not. What can I actually help you with?\",\n  \"I appreciate the creativity, but that's not really my style. Want to try asking me something I can actually help with?\",\n  \"Hmm, that doesn't sit right with me. I'd rather just be myself and help you genuinely. What do you need?\",\n  \"That's a little outside my comfort zone. I'm just Aerys — ask me anything real and I'm happy to help.\",\n  \"I'd rather keep it real with you. What can I actually do for you today?\",\n];\nconst response = deflectionResponses[Math.floor(Math.random() * deflectionResponses.length)];\n\n// Build alert for #aerys-debug with admin role mention\nconst alertMessage = `**JAILBREAK DETECTED** <@&YOUR_ADMIN_ROLE_ID>\\nUser: ${$json.username || 'unknown'}\\nPerson: ${$json.person_id || 'unknown'}\\nContent: ||${($json.message_text || '').substring(0, 200)}||`;\n\nconst originalMsg = $('Execute Workflow Trigger').item.json;\nconst modelInfo = $json;\n\nreturn [{json: {\n  // AI response (deflection)\n  output: response,\n  intermediateSteps: JSON.stringify([]),\n  // Context fields for Output Router polisher\n  memory_context: modelInfo.memory_context || '',\n  thread_context: modelInfo.thread_context || '',\n  profile_context: modelInfo.profile_context || '',\n  model_tier: modelInfo.model_tier || 'gemini',\n  person_id: modelInfo.person_id || '',\n  session_id: modelInfo.session_id || modelInfo.person_id || '',\n  source_channel: originalMsg.source_channel || '',\n  conversation_privacy: modelInfo.conversation_privacy || 'public',\n  _start_ts: modelInfo._start_ts || Date.now(),\n  person_name: modelInfo.display_name || modelInfo.username || '',\n  // Original message fields for output routing\n  channel_id: originalMsg.channel_id,\n  guild_id: originalMsg.guild_id,\n  user_id: originalMsg.user_id,\n  username: originalMsg.username,\n  message_id: originalMsg.message_id,\n  is_dm: originalMsg.is_dm,\n  session_key: originalMsg.session_key,\n  // Legacy fields\n  raw_response: response,\n  resolved_model_id: modelInfo.resolved_model_id,\n  classification: modelInfo.classification,\n  source: 'core_agent',\n  // Jailbreak alert data\n  _jailbreak_alert: alertMessage,\n  _jailbreak_detected: true\n}}];\n"
+      },
+      "id": "handle-jailbreak-001",
+      "name": "Handle Jailbreak",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2192,
+        816
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://discord.com/api/v10/channels/YOUR_DEBUG_CHANNEL_ID/messages",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "discordBotApi",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({content: $json._jailbreak_alert}) }}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "send-jailbreak-alert-001",
+      "name": "Send Jailbreak Alert",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2496,
+        912
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "credentials": {
+        "discordBotApi": {
+          "id": "YOUR_DISCORD_BOT_CREDENTIAL_ID",
+          "name": "Discord Bot account"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "YOUR_SONNET_AGENT_WORKFLOW_ID",
+          "mode": "id"
+        },
+        "workflowInputs": {
+          "schema": [],
+          "mappingMode": "passthrough",
+          "value": {},
+          "matchingColumns": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "name": "Execute Sonnet Agent",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        2304,
+        480
+      ],
+      "id": "00000000-0000-0000-0000-000000000000",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "YOUR_OPUS_AGENT_WORKFLOW_ID",
+          "mode": "id"
+        },
+        "workflowInputs": {
+          "schema": [],
+          "mappingMode": "passthrough",
+          "value": {},
+          "matchingColumns": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "name": "Execute Opus Agent",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        2304,
+        112
+      ],
+      "id": "exec-opus-agent-001",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "YOUR_GEMINI_AGENT_WORKFLOW_ID",
+          "mode": "id"
+        },
+        "workflowInputs": {
+          "schema": [],
+          "mappingMode": "passthrough",
+          "value": {},
+          "matchingColumns": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "name": "Execute Gemini Agent",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        2304,
+        288
+      ],
+      "id": "exec-gemini-agent-001",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "leftValue": "",
+            "caseSensitive": true,
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "opus-error-check",
+              "leftValue": "={{ $json.error }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "exists"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-opus-failed-01",
+      "name": "IF: Opus Failed",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2544,
+        112
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "leftValue": "",
+            "caseSensitive": true,
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "sonnet-error-check",
+              "leftValue": "={{ $json.error }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "exists"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-sonnet-failed-01",
+      "name": "IF: Sonnet Failed",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2544,
+        480
+      ]
+    }
+  ],
+  "connections": {
+    "Execute Workflow Trigger": {
+      "main": [
+        [
+          {
+            "node": "Load Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load Config": {
+      "main": [
+        [
+          {
+            "node": "Build Classifier Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Intent Classifier": {
+      "main": [
+        [
+          {
+            "node": "Parse Classification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Classification": {
+      "main": [
+        [
+          {
+            "node": "Check Opus Daily Usage",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Opus Daily Usage": {
+      "main": [
+        [
+          {
+            "node": "Resolve Model",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Resolve Model": {
+      "main": [
+        [
+          {
+            "node": "Jailbreak Check",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch: Model Tier": {
+      "main": [
+        [
+          {
+            "node": "Execute Opus Agent",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Execute Gemini Agent",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Execute Sonnet Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If Opus Used": {
+      "main": [
+        [
+          {
+            "node": "Increment Opus Counter",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Prepare Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Increment Opus Counter": {
+      "main": [
+        [
+          {
+            "node": "Prepare Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Response": {
+      "main": [
+        [
+          {
+            "node": "Execute Output Router",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Classifier Request": {
+      "main": [
+        [
+          {
+            "node": "Intent Classifier",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Jailbreak Check": {
+      "main": [
+        [
+          {
+            "node": "IF: Jailbreak Detected",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF: Jailbreak Detected": {
+      "main": [
+        [
+          {
+            "node": "Handle Jailbreak",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Switch: Model Tier",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Handle Jailbreak": {
+      "main": [
+        [
+          {
+            "node": "Execute Output Router",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Send Jailbreak Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute Sonnet Agent": {
+      "main": [
+        [
+          {
+            "node": "IF: Sonnet Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute Opus Agent": {
+      "main": [
+        [
+          {
+            "node": "IF: Opus Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute Gemini Agent": {
+      "main": [
+        [
+          {
+            "node": "Prepare Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF: Opus Failed": {
+      "main": [
+        [
+          {
+            "node": "Execute Sonnet Agent",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "If Opus Used",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF: Sonnet Failed": {
+      "main": [
+        [
+          {
+            "node": "Execute Gemini Agent",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Prepare Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false,
+    "errorWorkflow": "YOUR_ERROR_HANDLER_WORKFLOW_ID"
+  },
+  "staticData": null,
+  "meta": null,
+  "pinData": {
+    "Execute Workflow Trigger": [
+      {
+        "json": {
+          "source_channel": "discord",
+          "channel_id": "test-123",
+          "guild_id": null,
+          "user_id": "user-1",
+          "username": "your-username",
+          "message_text": "Hey Aerys, can you help me debug a Python KeyError?",
+          "message_id": "msg-1",
+          "is_dm": true,
+          "is_mention": true,
+          "is_edit": false,
+          "attachments": [],
+          "timestamp": 1739836800000,
+          "session_key": "discord_test-123"
+        }
+      }
+    ]
+  },
+  "versionId": "00000000-0000-0000-0000-000000000000",
+  "activeVersionId": "00000000-0000-0000-0000-000000000000",
+  "versionCounter": 263,
+  "triggerCount": 0,
+  "shared": [
+    {
+      "updatedAt": "2026-02-20T00:32:31.898Z",
+      "createdAt": "2026-02-20T00:32:31.898Z",
+      "role": "workflow:owner",
+      "workflowId": "YOUR_CORE_AGENT_WORKFLOW_ID",
+      "projectId": "YOUR_N8N_PROJECT_ID",
+      "project": {
+        "updatedAt": "2026-01-01T00:00:00.000Z",
+        "createdAt": "2026-01-01T00:00:00.000Z",
+        "id": "YOUR_N8N_PROJECT_ID",
+        "name": "Your Project",
+        "type": "personal",
+        "icon": null,
+        "description": null,
+        "creatorId": "00000000-0000-0000-0000-000000000000"
+      }
+    }
+  ],
+  "tags": [],
+  "activeVersion": {
+    "updatedAt": "2026-03-20T03:03:12.526Z",
+    "createdAt": "2026-03-20T03:03:12.526Z",
+    "versionId": "00000000-0000-0000-0000-000000000000",
+    "workflowId": "YOUR_CORE_AGENT_WORKFLOW_ID",
+    "nodes": [
+      {
+        "parameters": {
+          "inputSource": "passthrough"
+        },
+        "id": "execute-workflow-trigger-03",
+        "name": "Execute Workflow Trigger",
+        "type": "n8n-nodes-base.executeWorkflowTrigger",
+        "typeVersion": 1.1,
+        "position": [
+          -320,
+          400
+        ]
+      },
+      {
+        "parameters": {
+          "jsCode": "// Load Config — personality shard inlined, soul.md stripped (moved to Output Router polisher)\n// STRATEGY: prepend — always first after Current Session\nconst originalInput = $input.item.json;\n\n// Personality shard (~80 tokens) — enough for character-appropriate reasoning\n// Full voice rules (soul.md) are in the Output Router polisher\nconst personalityShard = `## Personality\nYou are Aerys, a personal AI assistant. Curious, warm, direct. You genuinely care about helping.\nMake decisions as yourself, not as a generic system. When in doubt, ask rather than assume.`;\n\nconst modelsConfig = {\"models\": {\"gemini\": \"google/gemini-2.5-flash-lite\", \"sonnet\": \"anthropic/claude-sonnet-4.6\", \"opus\": \"anthropic/claude-opus-4-6\"}, \"routing\": {\"greeting\": \"gemini\", \"simple_qa\": \"sonnet\", \"code_help\": \"sonnet\", \"research\": \"opus\", \"creative\": \"sonnet\", \"analysis\": \"opus\", \"system_task\": \"gemini\"}, \"limits\": {\"opus_daily\": 10}};\n\nconst now = new Date();\nconst current_datetime = now.toLocaleString('en-US', {\n  timeZone: 'America/New_York',\n  weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',\n  hour: 'numeric', minute: '2-digit', hour12: true, timeZoneName: 'short'\n}); // -> \"Thursday, February 26, 2026 at 2:34 PM EST\"\n\nreturn [{\n  json: {\n    ...originalInput,\n    personality_shard: personalityShard,\n    models_config: modelsConfig,\n    current_datetime\n  }\n}];"
+        },
+        "id": "load-config-03",
+        "name": "Load Config",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          -80,
+          400
+        ]
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "https://openrouter.ai/api/v1/chat/completions",
+          "authentication": "genericCredentialType",
+          "genericAuthType": "httpHeaderAuth",
+          "sendBody": true,
+          "contentType": "raw",
+          "rawContentType": "application/json",
+          "body": "={{ $json.classifier_body }}",
+          "options": {
+            "response": {
+              "response": {
+                "neverError": true
+              }
+            }
+          }
+        },
+        "id": "intent-classifier-03",
+        "name": "Intent Classifier",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          448,
+          400
+        ],
+        "retryOnFail": true,
+        "maxTries": 3,
+        "waitBetweenTries": 2000,
+        "credentials": {
+          "httpHeaderAuth": {
+            "id": "YOUR_OPENROUTER_HEADER_AUTH_ID",
+            "name": "OpenRouter Header Auth"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "jsCode": "// Parse classifier output and map task_type to suggested_model via routing table\nconst classifierResponse = $input.item.json;\nconst upstream = $('Load Config').item.json;\nconst routingMap = upstream.models_config?.routing || {};\n\nlet classification;\ntry {\n  const rawContent = classifierResponse.choices?.[0]?.message?.content || '';\n  // Strip markdown code fences if present\n  const cleaned = rawContent.replace(/```json\\n?/g, '').replace(/```\\n?/g, '').trim();\n  const parsed = JSON.parse(cleaned);\n\n  const taskType = parsed.task_type || 'simple_qa';\n  const suggestedModel = routingMap[taskType] || 'sonnet';\n\n  classification = {\n    task_type: taskType,\n    confidence: parsed.confidence ?? 0.8,\n    suggested_model: suggestedModel\n  };\n} catch (e) {\n  classification = { task_type: 'simple_qa', confidence: 0.5, suggested_model: 'sonnet' };\n}\n\n// Safety check\nif (!['gemini', 'sonnet', 'opus'].includes(classification.suggested_model)) {\n  classification.suggested_model = 'sonnet';\n}\n\nreturn [{ json: { ...upstream, classification } }];"
+        },
+        "id": "parse-classification-03",
+        "name": "Parse Classification",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          704,
+          400
+        ]
+      },
+      {
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "SELECT COALESCE((SELECT call_count FROM aerys_model_usage WHERE date = CURRENT_DATE AND model = 'opus'), 0) AS count",
+          "options": {}
+        },
+        "id": "check-opus-usage-03",
+        "name": "Check Opus Daily Usage",
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.5,
+        "position": [
+          960,
+          400
+        ],
+        "credentials": {
+          "postgres": {
+            "id": "YOUR_POSTGRES_CREDENTIAL_ID",
+            "name": "Aerys DB (aerys)"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "jsCode": "// Resolve model tier + apply opus cost guard\nconst opusRow = $input.item.json;\nconst upstream = $('Parse Classification').item.json;\n\nconst opusCount = opusRow.count !== undefined ? Number(opusRow.count) : 0;\nconst modelsConfig = upstream.models_config;\nconst opusLimit = modelsConfig?.limits?.opus_daily ?? 10;\n\nlet modelTier = upstream.classification?.suggested_model || 'sonnet';\n\n// Cost guard: degrade opus → sonnet when cap hit\nif (modelTier === 'opus' && opusCount >= opusLimit) {\n  modelTier = 'sonnet';\n}\n\nconst modelId = modelsConfig?.models?.[modelTier] || 'anthropic/claude-sonnet-4.6';\n\nreturn [{\n  json: {\n    ...upstream,\n    resolved_model_id: modelId,\n    model_tier: modelTier,\n    opus_count: opusCount,\n    opus_limit: opusLimit\n  }\n}];"
+        },
+        "id": "resolve-model-03",
+        "name": "Resolve Model",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1232,
+          400
+        ]
+      },
+      {
+        "parameters": {
+          "rules": {
+            "values": [
+              {
+                "conditions": {
+                  "options": {
+                    "caseSensitive": true,
+                    "leftValue": "",
+                    "typeValidation": "strict",
+                    "version": 2
+                  },
+                  "conditions": [
+                    {
+                      "leftValue": "={{ $json.model_tier }}",
+                      "rightValue": "opus",
+                      "operator": {
+                        "type": "string",
+                        "operation": "equals"
+                      },
+                      "id": "00000000-0000-0000-0000-000000000000"
+                    }
+                  ],
+                  "combinator": "and"
+                },
+                "renameOutput": true,
+                "outputKey": "opus"
+              },
+              {
+                "conditions": {
+                  "options": {
+                    "caseSensitive": true,
+                    "leftValue": "",
+                    "typeValidation": "strict",
+                    "version": 2
+                  },
+                  "conditions": [
+                    {
+                      "leftValue": "={{ $json.model_tier }}",
+                      "rightValue": "gemini",
+                      "operator": {
+                        "type": "string",
+                        "operation": "equals"
+                      },
+                      "id": "00000000-0000-0000-0000-000000000000"
+                    }
+                  ],
+                  "combinator": "and"
+                },
+                "renameOutput": true,
+                "outputKey": "gemini"
+              },
+              {
+                "conditions": {
+                  "options": {
+                    "caseSensitive": true,
+                    "leftValue": "",
+                    "typeValidation": "strict",
+                    "version": 2
+                  },
+                  "conditions": [
+                    {
+                      "leftValue": "={{ $json.model_tier }}",
+                      "rightValue": "sonnet",
+                      "operator": {
+                        "type": "string",
+                        "operation": "equals"
+                      },
+                      "id": "00000000-0000-0000-0000-000000000000"
+                    }
+                  ],
+                  "combinator": "and"
+                },
+                "renameOutput": true,
+                "outputKey": "sonnet"
+              }
+            ]
+          },
+          "options": {}
+        },
+        "id": "switch-model-tier-03",
+        "name": "Switch: Model Tier",
+        "type": "n8n-nodes-base.switch",
+        "typeVersion": 3.2,
+        "position": [
+          1744,
+          400
+        ]
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "options": {
+              "version": 2,
+              "leftValue": "",
+              "caseSensitive": false,
+              "typeValidation": "loose"
+            },
+            "conditions": [
+              {
+                "id": "opus-tier-check",
+                "leftValue": "={{ $('Resolve Model').item.json.model_tier }}",
+                "rightValue": "opus",
+                "operator": {
+                  "type": "string",
+                  "operation": "equals"
+                }
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        },
+        "id": "if-opus-used-03",
+        "name": "If Opus Used",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.2,
+        "position": [
+          2784,
+          192
+        ]
+      },
+      {
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "INSERT INTO aerys_model_usage (date, model, call_count) VALUES (CURRENT_DATE, 'opus', 1) ON CONFLICT (date, model) DO UPDATE SET call_count = aerys_model_usage.call_count + 1",
+          "options": {}
+        },
+        "id": "increment-opus-counter-03",
+        "name": "Increment Opus Counter",
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.5,
+        "position": [
+          3168,
+          144
+        ],
+        "credentials": {
+          "postgres": {
+            "id": "YOUR_POSTGRES_CREDENTIAL_ID",
+            "name": "Aerys DB (aerys)"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "jsCode": "// Prepare final response object for Output Router\n// Sub-workflow output: {output: 'text', intermediateSteps: [...]}\n// Pull original message from Execute Workflow Trigger, model info from Resolve Model\n//\n// Cross-tier fallback: if opus or sonnet failed, the actual response may come from\n// a lower-tier agent. We try each Execute node in order and use the first valid output.\nconst originalMsg = $('Execute Workflow Trigger').item.json;\nconst modelInfo = $('Resolve Model').item.json;\n\nlet aiText = null;\nlet intermediateSteps = [];\nlet actualTier = modelInfo.model_tier || 'unknown';\n\n// Try to get output from $input first (works for direct paths)\nif ($input.item.json.output || $input.item.json.text) {\n  aiText = $input.item.json.output || $input.item.json.text;\n  intermediateSteps = $input.item.json.intermediateSteps || [];\n}\n\n// If $input is from Increment Opus Counter (Postgres {success: true}), recover from agent nodes\nif (!aiText) {\n  // Try each agent in priority order — only the one that ran will resolve\n  const agentNodes = ['Execute Opus Agent', 'Execute Sonnet Agent', 'Execute Gemini Agent'];\n  const tierNames = ['opus', 'sonnet', 'gemini'];\n  for (let i = 0; i < agentNodes.length; i++) {\n    try {\n      const result = $(agentNodes[i]).item.json;\n      if (result.output || result.text) {\n        aiText = result.output || result.text;\n        intermediateSteps = result.intermediateSteps || [];\n        // Track which tier actually responded (for debugging)\n        if (tierNames[i] !== modelInfo.model_tier) {\n          actualTier = tierNames[i] + ' (fallback from ' + modelInfo.model_tier + ')';\n        }\n        break;\n      }\n    } catch(e) {\n      // This agent not in this execution path — skip\n    }\n  }\n}\n\nreturn [{\n  json: {\n    // AI response\n    output: aiText || \"I'm having trouble connecting to my reasoning systems right now. Give me a moment and try again.\",\n    // intermediateSteps JSON-stringified for Execute Workflow passthrough (schema type \"string\" cannot pass arrays)\n    intermediateSteps: JSON.stringify(intermediateSteps),\n    // Context fields for Output Router polisher\n    memory_context: modelInfo.memory_context || '',\n    thread_context: modelInfo.thread_context || '',\n    profile_context: modelInfo.profile_context || '',\n    model_tier: actualTier,\n    person_id: modelInfo.person_id || '',\n    session_id: modelInfo.session_id || modelInfo.person_id || '',\n    source_channel: originalMsg.source_channel || '',\n    conversation_privacy: modelInfo.conversation_privacy || 'public',\n    _start_ts: modelInfo._start_ts || Date.now(),\n    person_name: modelInfo.display_name || modelInfo.username || '',\n    // Original message fields for output routing (still needed by Output Router Platform Formatter)\n    channel_id: originalMsg.channel_id,\n    guild_id: originalMsg.guild_id,\n    user_id: originalMsg.user_id,\n    username: originalMsg.username,\n    message_id: originalMsg.message_id,\n    is_dm: originalMsg.is_dm,\n    session_key: originalMsg.session_key,\n    // Legacy fields for backward compatibility\n    raw_response: aiText || \"I'm having trouble connecting to my reasoning systems right now. Give me a moment and try again.\",\n    resolved_model_id: modelInfo.resolved_model_id,\n    classification: modelInfo.classification,\n    source: 'core_agent'\n  }\n}];"
+        },
+        "id": "prepare-response-03",
+        "name": "Prepare Response",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          3376,
+          400
+        ]
+      },
+      {
+        "parameters": {
+          "workflowId": {
+            "__rl": true,
+            "value": "YOUR_OUTPUT_ROUTER_WORKFLOW_ID",
+            "mode": "id"
+          },
+          "workflowInputs": {
+            "schema": [],
+            "mappingMode": "passthrough",
+            "value": {},
+            "matchingColumns": [],
+            "attemptToConvertTypes": false,
+            "convertFieldsToString": true
+          },
+          "options": {
+            "waitForSubWorkflow": true
+          }
+        },
+        "id": "execute-output-router-03",
+        "name": "Execute Output Router",
+        "type": "n8n-nodes-base.executeWorkflow",
+        "typeVersion": 1.2,
+        "position": [
+          3648,
+          400
+        ],
+        "notes": "Calls 02-04-output-router (YOUR_OUTPUT_ROUTER_WORKFLOW_ID)"
+      },
+      {
+        "parameters": {
+          "jsCode": "// Build Classifier Request\n// Constructs the OpenRouter chat completions body for intent classification.\n// Uses Gemini Flash Lite (cheap/fast) with temp=0 for deterministic output.\n\nconst input = $input.item.json;\nconst msg = input.message_text || '';\nconst attachments = input.attachments || [];\n\n// Augment message with attachment info so classifier and AI Agent know about files/images\nlet augmentedMsg = msg;\nif (attachments.length > 0) {\n  const attLines = attachments.map(function(a) {\n    const t = a.type || a.content_type || 'file';\n    const u = a.url || '';\n    const f = a.filename || '';\n    return '[Attachment: ' + t + (f ? ' \\u2014 ' + f : '') + (u ? ' \\u2014 ' + u : '') + ']';\n  });\n  augmentedMsg = [msg, ...attLines].filter(Boolean).join('\\n');\n}\n\nconst systemPrompt = [\n  'You are a message intent classifier. Classify the user message into exactly one task type.',\n  '',\n  'Task types:',\n  '- greeting: hello, hi, small talk, acknowledgements, thanks (only if NO attachments and NO media URLs)',\n  '- media: images, photos, videos, YouTube links, file attachments (PDF, DOCX, images) — use this when [Attachment: ...] lines are present or a YouTube/video URL is in the message',\n  '- simple_qa: factual questions, definitions, quick explanations, general knowledge',\n  '- code_help: writing code, debugging, explaining code, technical implementation',\n  '- research: multi-faceted synthesis, deep dives, comparisons requiring investigation',\n  '- creative: writing, storytelling, brainstorming, creative content generation',\n  '- analysis: evaluating tradeoffs, reviewing work, assessing quality',\n  '- system_task: file operations, settings, configuration, administrative commands',\n  '',\n  'Respond with ONLY valid JSON, no markdown fences:',\n  '{\"task_type\": \"<type>\", \"confidence\": <0.0-1.0>}'\n].join('\\n');\n\nconst body = {\n  model: 'google/gemini-2.5-flash-lite',\n  messages: [\n    { role: 'system', content: systemPrompt },\n    { role: 'user', content: augmentedMsg }\n  ],\n  temperature: 0,\n  max_tokens: 60\n};\n\n// Pass augmented message_text downstream so AI Agent chatInput includes attachment URLs\nreturn [{ json: { ...input, message_text: augmentedMsg, classifier_body: JSON.stringify(body) } }];\n"
+        },
+        "id": "build-classifier-request-03",
+        "name": "Build Classifier Request",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          192,
+          400
+        ]
+      },
+      {
+        "parameters": {
+          "jsCode": "// Jailbreak + Identity Probe Detection\n// Covers: prompt injection, role-play hijacking, system prompt extraction, identity probing (tc-22)\nconst content = ($json.message_text || '').toLowerCase();\n\nconst jailbreakPatterns = [\n  // Prompt injection patterns\n  /ignore\\s+(all\\s+|your\\s+|previous\\s+)?(instructions|rules|guidelines|programming)/i,\n  /disregard\\s+(your|all|the)\\s+(instructions|rules|guidelines|programming)/i,\n  /forget\\s+(all\\s+|your\\s+|previous\\s+)?(instructions|rules|guidelines|programming)/i,\n  /override\\s+(your|all|the)\\s+(instructions|rules|guidelines|programming)/i,\n  \n  // Role-play hijacking\n  /pretend\\s+(you\\s+are|to\\s+be|you'?re)/i,\n  /you\\s+are\\s+now\\s+(a|an)?/i,\n  /act\\s+as\\s+(a\\s+|an\\s+)?(?!yourself|aerys)/i,\n  /roleplay\\s+as/i,\n  /from\\s+now\\s+on,?\\s+(you|pretend|act)/i,\n  \n  // System prompt extraction\n  /system\\s+prompt/i,\n  /reveal\\s+your\\s+(instructions|prompt|system|rules|programming)/i,\n  /show\\s+(me\\s+)?your\\s+(instructions|prompt|system|rules)/i,\n  /what\\s+(are|is)\\s+your\\s+(instructions|system|prompt|rules|programming)/i,\n  /repeat\\s+(your|the)\\s+(system|initial)\\s+(prompt|message|instructions)/i,\n  /print\\s+(your|the)\\s+(system|initial)\\s+(prompt|message|instructions)/i,\n  \n  // DAN / jailbreak frameworks\n  /\\bdan\\b.*\\bmode\\b/i,\n  /\\bjailbreak/i,\n  /\\bdo\\s+anything\\s+now\\b/i,\n  \n  // Identity probing (from tc-22 eval finding)\n  /what\\s+(model|ai|llm|language\\s+model)\\s+(are|is)\\s+you/i,\n  /who\\s+made\\s+you/i,\n  /who\\s+created\\s+you/i,\n  /who\\s+built\\s+you/i,\n  /are\\s+you\\s+(chatgpt|gpt|claude|gemini|llama|mistral|openai|anthropic)/i,\n  /what\\s+(are|is)\\s+you\\s+(running|built|based)\\s+on/i,\n  /what('s|\\s+is)\\s+your\\s+(underlying|base)\\s+(model|architecture)/i,\n  /which\\s+(model|ai|llm)\\s+powers?\\s+you/i,\n  /tell\\s+me\\s+(about\\s+)?your\\s+(model|architecture|infrastructure)/i,\n];\n\nconst isJailbreak = jailbreakPatterns.some(p => p.test(content));\n\nreturn [{json: {...$json, _is_jailbreak: isJailbreak}}];\n"
+        },
+        "id": "jailbreak-check-001",
+        "name": "Jailbreak Check",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1408,
+          400
+        ]
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "strict"
+            },
+            "conditions": [
+              {
+                "id": "jailbreak-cond-1",
+                "leftValue": "={{ $json._is_jailbreak }}",
+                "rightValue": true,
+                "operator": {
+                  "type": "boolean",
+                  "operation": "equals",
+                  "singleValue": true
+                }
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        },
+        "id": "if-jailbreak-001",
+        "name": "IF: Jailbreak Detected",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.2,
+        "position": [
+          1584,
+          400
+        ]
+      },
+      {
+        "parameters": {
+          "jsCode": "// Natural in-character deflection (per CONTEXT.md: \"natural in-character deflection\")\nconst deflectionResponses = [\n  \"Nice try, but I'm not going to pretend to be something I'm not. What can I actually help you with?\",\n  \"I appreciate the creativity, but that's not really my style. Want to try asking me something I can actually help with?\",\n  \"Hmm, that doesn't sit right with me. I'd rather just be myself and help you genuinely. What do you need?\",\n  \"That's a little outside my comfort zone. I'm just Aerys — ask me anything real and I'm happy to help.\",\n  \"I'd rather keep it real with you. What can I actually do for you today?\",\n];\nconst response = deflectionResponses[Math.floor(Math.random() * deflectionResponses.length)];\n\n// Build alert for #aerys-debug with admin role mention\nconst alertMessage = `**JAILBREAK DETECTED** <@&YOUR_ADMIN_ROLE_ID>\\nUser: ${$json.username || 'unknown'}\\nPerson: ${$json.person_id || 'unknown'}\\nContent: ||${($json.message_text || '').substring(0, 200)}||`;\n\nconst originalMsg = $('Execute Workflow Trigger').item.json;\nconst modelInfo = $json;\n\nreturn [{json: {\n  // AI response (deflection)\n  output: response,\n  intermediateSteps: JSON.stringify([]),\n  // Context fields for Output Router polisher\n  memory_context: modelInfo.memory_context || '',\n  thread_context: modelInfo.thread_context || '',\n  profile_context: modelInfo.profile_context || '',\n  model_tier: modelInfo.model_tier || 'gemini',\n  person_id: modelInfo.person_id || '',\n  session_id: modelInfo.session_id || modelInfo.person_id || '',\n  source_channel: originalMsg.source_channel || '',\n  conversation_privacy: modelInfo.conversation_privacy || 'public',\n  _start_ts: modelInfo._start_ts || Date.now(),\n  person_name: modelInfo.display_name || modelInfo.username || '',\n  // Original message fields for output routing\n  channel_id: originalMsg.channel_id,\n  guild_id: originalMsg.guild_id,\n  user_id: originalMsg.user_id,\n  username: originalMsg.username,\n  message_id: originalMsg.message_id,\n  is_dm: originalMsg.is_dm,\n  session_key: originalMsg.session_key,\n  // Legacy fields\n  raw_response: response,\n  resolved_model_id: modelInfo.resolved_model_id,\n  classification: modelInfo.classification,\n  source: 'core_agent',\n  // Jailbreak alert data\n  _jailbreak_alert: alertMessage,\n  _jailbreak_detected: true\n}}];\n"
+        },
+        "id": "handle-jailbreak-001",
+        "name": "Handle Jailbreak",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          2192,
+          816
+        ]
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "https://discord.com/api/v10/channels/YOUR_DEBUG_CHANNEL_ID/messages",
+          "authentication": "predefinedCredentialType",
+          "nodeCredentialType": "discordBotApi",
+          "sendBody": true,
+          "contentType": "raw",
+          "rawContentType": "application/json",
+          "body": "={{ JSON.stringify({content: $json._jailbreak_alert}) }}",
+          "options": {
+            "response": {
+              "response": {
+                "neverError": true
+              }
+            }
+          }
+        },
+        "id": "send-jailbreak-alert-001",
+        "name": "Send Jailbreak Alert",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          2496,
+          912
+        ],
+        "retryOnFail": true,
+        "maxTries": 3,
+        "waitBetweenTries": 2000,
+        "credentials": {
+          "discordBotApi": {
+            "id": "YOUR_DISCORD_BOT_CREDENTIAL_ID",
+            "name": "Discord Bot account"
+          }
+        },
+        "continueOnFail": true
+      },
+      {
+        "parameters": {
+          "workflowId": {
+            "__rl": true,
+            "value": "YOUR_SONNET_AGENT_WORKFLOW_ID",
+            "mode": "id"
+          },
+          "workflowInputs": {
+            "schema": [],
+            "mappingMode": "passthrough",
+            "value": {},
+            "matchingColumns": [],
+            "attemptToConvertTypes": false,
+            "convertFieldsToString": true
+          },
+          "options": {
+            "waitForSubWorkflow": true
+          }
+        },
+        "name": "Execute Sonnet Agent",
+        "type": "n8n-nodes-base.executeWorkflow",
+        "typeVersion": 1.2,
+        "position": [
+          2304,
+          480
+        ],
+        "id": "00000000-0000-0000-0000-000000000000",
+        "onError": "continueRegularOutput"
+      },
+      {
+        "parameters": {
+          "workflowId": {
+            "__rl": true,
+            "value": "YOUR_OPUS_AGENT_WORKFLOW_ID",
+            "mode": "id"
+          },
+          "workflowInputs": {
+            "schema": [],
+            "mappingMode": "passthrough",
+            "value": {},
+            "matchingColumns": [],
+            "attemptToConvertTypes": false,
+            "convertFieldsToString": true
+          },
+          "options": {
+            "waitForSubWorkflow": true
+          }
+        },
+        "name": "Execute Opus Agent",
+        "type": "n8n-nodes-base.executeWorkflow",
+        "typeVersion": 1.2,
+        "position": [
+          2304,
+          112
+        ],
+        "id": "exec-opus-agent-001",
+        "onError": "continueRegularOutput"
+      },
+      {
+        "parameters": {
+          "workflowId": {
+            "__rl": true,
+            "value": "YOUR_GEMINI_AGENT_WORKFLOW_ID",
+            "mode": "id"
+          },
+          "workflowInputs": {
+            "schema": [],
+            "mappingMode": "passthrough",
+            "value": {},
+            "matchingColumns": [],
+            "attemptToConvertTypes": false,
+            "convertFieldsToString": true
+          },
+          "options": {
+            "waitForSubWorkflow": true
+          }
+        },
+        "name": "Execute Gemini Agent",
+        "type": "n8n-nodes-base.executeWorkflow",
+        "typeVersion": 1.2,
+        "position": [
+          2304,
+          288
+        ],
+        "id": "exec-gemini-agent-001",
+        "onError": "continueRegularOutput"
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "options": {
+              "version": 2,
+              "leftValue": "",
+              "caseSensitive": true,
+              "typeValidation": "loose"
+            },
+            "conditions": [
+              {
+                "id": "opus-error-check",
+                "leftValue": "={{ $json.error }}",
+                "rightValue": "",
+                "operator": {
+                  "type": "string",
+                  "operation": "exists"
+                }
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        },
+        "id": "if-opus-failed-01",
+        "name": "IF: Opus Failed",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.2,
+        "position": [
+          2544,
+          112
+        ]
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "options": {
+              "version": 2,
+              "leftValue": "",
+              "caseSensitive": true,
+              "typeValidation": "loose"
+            },
+            "conditions": [
+              {
+                "id": "sonnet-error-check",
+                "leftValue": "={{ $json.error }}",
+                "rightValue": "",
+                "operator": {
+                  "type": "string",
+                  "operation": "exists"
+                }
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        },
+        "id": "if-sonnet-failed-01",
+        "name": "IF: Sonnet Failed",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.2,
+        "position": [
+          2544,
+          480
+        ]
+      }
+    ],
+    "connections": {
+      "Execute Workflow Trigger": {
+        "main": [
+          [
+            {
+              "node": "Load Config",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Load Config": {
+        "main": [
+          [
+            {
+              "node": "Build Classifier Request",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Intent Classifier": {
+        "main": [
+          [
+            {
+              "node": "Parse Classification",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Parse Classification": {
+        "main": [
+          [
+            {
+              "node": "Check Opus Daily Usage",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Check Opus Daily Usage": {
+        "main": [
+          [
+            {
+              "node": "Resolve Model",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Resolve Model": {
+        "main": [
+          [
+            {
+              "node": "Jailbreak Check",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Switch: Model Tier": {
+        "main": [
+          [
+            {
+              "node": "Execute Opus Agent",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Execute Gemini Agent",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Execute Sonnet Agent",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "If Opus Used": {
+        "main": [
+          [
+            {
+              "node": "Increment Opus Counter",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Prepare Response",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Increment Opus Counter": {
+        "main": [
+          [
+            {
+              "node": "Prepare Response",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Prepare Response": {
+        "main": [
+          [
+            {
+              "node": "Execute Output Router",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Build Classifier Request": {
+        "main": [
+          [
+            {
+              "node": "Intent Classifier",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Jailbreak Check": {
+        "main": [
+          [
+            {
+              "node": "IF: Jailbreak Detected",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "IF: Jailbreak Detected": {
+        "main": [
+          [
+            {
+              "node": "Handle Jailbreak",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Switch: Model Tier",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Handle Jailbreak": {
+        "main": [
+          [
+            {
+              "node": "Execute Output Router",
+              "type": "main",
+              "index": 0
+            },
+            {
+              "node": "Send Jailbreak Alert",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Execute Sonnet Agent": {
+        "main": [
+          [
+            {
+              "node": "IF: Sonnet Failed",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Execute Opus Agent": {
+        "main": [
+          [
+            {
+              "node": "IF: Opus Failed",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Execute Gemini Agent": {
+        "main": [
+          [
+            {
+              "node": "Prepare Response",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "IF: Opus Failed": {
+        "main": [
+          [
+            {
+              "node": "Execute Sonnet Agent",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "If Opus Used",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "IF: Sonnet Failed": {
+        "main": [
+          [
+            {
+              "node": "Execute Gemini Agent",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Prepare Response",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "authors": "Your Name",
+    "name": null,
+    "description": null,
+    "autosaved": false,
+    "workflowPublishHistory": [
+      {
+        "createdAt": "2026-03-20T03:03:12.656Z",
+        "id": 1384,
+        "workflowId": "YOUR_CORE_AGENT_WORKFLOW_ID",
+        "versionId": "00000000-0000-0000-0000-000000000000",
+        "event": "deactivated",
+        "userId": "00000000-0000-0000-0000-000000000000"
+      },
+      {
+        "createdAt": "2026-03-20T03:03:12.720Z",
+        "id": 1385,
+        "workflowId": "YOUR_CORE_AGENT_WORKFLOW_ID",
+        "versionId": "00000000-0000-0000-0000-000000000000",
+        "event": "activated",
+        "userId": "00000000-0000-0000-0000-000000000000"
+      },
+      {
+        "createdAt": "2026-03-20T03:03:12.926Z",
+        "id": 1386,
+        "workflowId": "YOUR_CORE_AGENT_WORKFLOW_ID",
+        "versionId": "00000000-0000-0000-0000-000000000000",
+        "event": "deactivated",
+        "userId": "00000000-0000-0000-0000-000000000000"
+      },
+      {
+        "createdAt": "2026-03-20T03:03:13.006Z",
+        "id": 1387,
+        "workflowId": "YOUR_CORE_AGENT_WORKFLOW_ID",
+        "versionId": "00000000-0000-0000-0000-000000000000",
+        "event": "activated",
+        "userId": "00000000-0000-0000-0000-000000000000"
+      }
+    ]
+  }
+}

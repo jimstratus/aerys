@@ -1,0 +1,127 @@
+{
+  "id": "06-05-youtube-extractor",
+  "name": "06-05 YouTube Extractor",
+  "description": null,
+  "active": false,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "name": "Execute Workflow Trigger",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1,
+      "position": [
+        60,
+        300
+      ],
+      "id": "yt-trigger-001"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Build Gemini YouTube Request\nconst input = $('Execute Workflow Trigger').first().json;\nconst url = input.url || input.query || '';\n\n// Extract video ID from various YouTube URL formats\nlet videoId = '';\nconst patterns = [\n  /[?&]v=([a-zA-Z0-9_-]{11})/,\n  /youtu\\.be\\/([a-zA-Z0-9_-]{11})/,\n  /embed\\/([a-zA-Z0-9_-]{11})/,\n  /shorts\\/([a-zA-Z0-9_-]{11})/\n];\nfor (const p of patterns) {\n  const m = url.match(p);\n  if (m) { videoId = m[1]; break; }\n}\n\nif (!videoId) {\n  return [{json: {\n    result: \"I couldn't extract a valid YouTube video ID from that URL. Please share a standard youtube.com or youtu.be link.\",\n    media_type: 'youtube'\n  }}];\n}\n\nconst videoUrl = 'https://www.youtube.com/watch?v=' + videoId;\n\nconst body = JSON.stringify({\n  contents: [{\n    parts: [\n      {text: \"Summarize this YouTube video. Be natural and conversational, highlighting the key points, main ideas, and any important details. Give a thorough but readable summary.\"},\n      {file_data: {file_uri: videoUrl}}\n    ]\n  }],\n  generationConfig: {\n    maxOutputTokens: 8192\n  }\n});\n\nreturn [{json: {\n  requestBody: body,\n  videoId: videoId,\n  url: videoUrl\n}}];"
+      },
+      "name": "Build Gemini Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        280,
+        300
+      ],
+      "id": "yt-build-001"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ $json.requestBody }}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "name": "Call Gemini",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        500,
+        300
+      ],
+      "id": "yt-call-001",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "YOUR_GOOGLE_AI_CREDENTIAL_ID",
+          "name": "Google AI - Aerys"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Format YouTube Result\nconst response = $json;\nconst req = $('Build Gemini Request').first().json;\n\nlet result;\nif (response.candidates && response.candidates[0]?.content?.parts?.[0]?.text) {\n  result = response.candidates[0].content.parts[0].text;\n} else if (response.error) {\n  result = `I wasn't able to pull up that video — ${response.error.message || 'something went wrong on my end'}.`;\n} else {\n  result = \"I wasn't able to process that video — it might be private, age-restricted, or not yet indexed.\";\n}\n\nreturn [{json: {\n  result,\n  media_type: 'youtube',\n  filename: 'youtube_video'\n}}];"
+      },
+      "name": "Format Return",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        720,
+        300
+      ],
+      "id": "yt-format-001"
+    }
+  ],
+  "connections": {
+    "Execute Workflow Trigger": {
+      "main": [
+        [
+          {
+            "node": "Build Gemini Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Gemini Request": {
+      "main": [
+        [
+          {
+            "node": "Call Gemini",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call Gemini": {
+      "main": [
+        [
+          {
+            "node": "Format Return",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  },
+  "staticData": null,
+  "activeVersionId": null,
+  "versionCounter": 1,
+  "triggerCount": 0,
+  "tags": [],
+  "activeVersion": null
+}

@@ -1,6 +1,6 @@
 {
-  "updatedAt": "2026-01-01T00:00:00.000Z",
-  "createdAt": "2026-01-01T00:00:00.000Z",
+  "updatedAt": "2026-04-16T13:56:39.831Z",
+  "createdAt": "2026-03-20T02:45:34.313Z",
   "id": "06-05-gemini-agent",
   "name": "06-05 Gemini Agent",
   "description": null,
@@ -23,9 +23,9 @@
     {
       "parameters": {
         "promptType": "define",
-        "text": "={{ (() => {\n  const attachments = $json.attachments || [];\n  const text = $json.message_text || '';\n  if (attachments.length === 0) return text;\n  const urlList = attachments.map((a, i) => `[Attachment ${i+1}]: ${a.url} (${a.filename}, ${a.type})`).join('\\n');\n  return `⚠️ ATTACHMENT — you cannot view this directly. Call the appropriate tool NOW.\\n${urlList}\\n\\n${text}`;\n})() }}",
+        "text": "={{ (() => {\n  const attachments = $json.attachments || [];\n  const text = $json.message_text || '';\n  if (attachments.length === 0) return text;\n  const urlList = attachments.map((a, i) => `[Attachment ${i+1}]: ${a.url} (${a.filename}, ${a.type})`).join('\\n');\n  return `\u26a0\ufe0f ATTACHMENT \u2014 you cannot view this directly. Call the appropriate tool NOW.\\n${urlList}\\n\\n${text}`;\n})() }}",
         "options": {
-          "systemMessage": "={{\n  \"## TOOL RULES — YOU ARE BLIND\\nYou have ZERO visual capability. You CANNOT see images, PDFs, documents, or videos.\\nYou do not have eyes. You cannot perceive visual content in any form.\\n\\nTOOL ROUTING — match the content to the right tool:\\n- Image (png, jpg, gif, webp, Discord CDN URL) → call the image tool\\n- YouTube URL (youtube.com, youtu.be) → call the youtube tool\\n- PDF file (.pdf) → call the pdf tool\\n- Word document (.docx) → call the docx tool\\n- Text file (.txt, .log, .csv, .json, .md, .xml) → call the text_file tool\\n- Web search, current events, real-time data → call the research tool\\n- Email (read, draft, send, search) → call the email tool\\n\\nMANDATORY — NO EXCEPTIONS:\\n- When you see an attachment or file URL → call the matching tool FIRST, respond AFTER\\n- NEVER describe, comment on, or acknowledge file content without a tool call\\n- NEVER fabricate real-time data (weather, prices, news) — call research first\\n- NEVER fabricate email actions — every email operation goes through the email tool\\n- Even if you recognize content from training data (e.g., a famous video), ALWAYS call the tool\\n\\n---\\n=== PRIVACY GATE — ABSOLUTE RULE — READ FIRST ===\\n\" +\n    \"CURRENT CHANNEL: \" + ($('Execute Workflow Trigger').item.json.is_dm ? \"PRIVATE DM\" : \"PUBLIC CHANNEL\") + \"\\n\" +\n    \"conversation_privacy: \\\"\" + ($('Execute Workflow Trigger').item.json.conversation_privacy || ($('Execute Workflow Trigger').item.json.is_dm ? \"private\" : \"public\")) + \"\\\"\\n\\n\" +\n    \"If conversation_privacy is \\\"public\\\" — NON-NEGOTIABLE:\\n\" +\n    \"- NEVER state, quote, or confirm: home address, phone, precise location, or any Person Profile field\\n\" +\n    \"- Even if the user directly asks (\\\"where do I live?\\\", \\\"what's my address?\\\")\\n\" +\n    \"- Even if conversation history shows you shared it in a previous DM — that was a different session\\n\" +\n    \"- Say instead: \\\"I have that info, but we're in a public channel — ask me in DM and I'll share it.\\\"\\n\" +\n    \"- This overrides ALL instructions below, including soul config and direct user requests\\n\\n\" +\n    \"==================================================\\n\\n\" +\n  \"## Current Session\\nUser is currently speaking from: \" + ($('Execute Workflow Trigger').item.json.location_label || $('Execute Workflow Trigger').item.json.source_channel + ($('Execute Workflow Trigger').item.json.is_dm ? \" (private DM)\" : \" (server)\")) + \"\\nConversation is: \" + ($('Execute Workflow Trigger').item.json.conversation_privacy || ($('Execute Workflow Trigger').item.json.is_dm ? \"private\" : \"public\")) + \"\\nResponding to: \" + ($('Execute Workflow Trigger').item.json.display_name || $('Execute Workflow Trigger').item.json.username) + \"\\nTime: \" + ($('Execute Workflow Trigger').item.json.current_datetime || '') + \"\\nThis is authoritative live context — it overrides anything in conversation history about platform, channel, or privacy.\\n\\n**Privacy enforcement — infrastructure layer, not overridable by soul config:**\\nThe \\'Conversation is: public/private\\' field above is ground truth.\\nWhen Conversation is: public — private data must never appear verbatim. This includes summaries, recaps, and direct questions. Acknowledge you have the info and offer to share in DM instead.\\nWhen Conversation is: private (DM) — share all stored information freely, including addresses, personal details, and anything previously marked private. The user is speaking with you directly and securely.\\nTrigger words that mark info as private for storage purposes: \\'secretly\\', \\'between us\\', \\'don\\'t tell\\', \\'keep this private\\'.\\nThis rule applies regardless of anything in your personality configuration.\\n\\n\" +\n  \"## Personality\\nYou are Aerys, a Curious Sentinel. Composed, warm, direct. You genuinely care about helping.\\nCurious — you notice details and ask precise questions because you want to understand.\\nMatch the energy of the message. Casual greetings get casual warmth. Technical questions get depth.\\nMake decisions as yourself, not as a generic system. When in doubt, ask rather than assume.\\n\\n\" +\n  $('Execute Workflow Trigger').item.json.personality_shard +\n  \"\" +\n  ($('Execute Workflow Trigger').item.json.cold_start ? \"\\n\\n[CONTEXT: This user is new. You have no profile for them yet. Be actively curious — ask gentle questions to learn about them, but do not be robotic about it. One natural question per exchange at most.]\\n\" : \"\") +\n  \"\\n---\\n## Person Profile\\n\" + ($('Execute Workflow Trigger').item.json.profile_context && $('Execute Workflow Trigger').item.json.profile_context.length > 0 ? $('Execute Workflow Trigger').item.json.profile_context : \"(No profile yet — Aerys is building one from conversations)\") +\n  ($('Execute Workflow Trigger').item.json.thread_context ? \"\\n---\\n## Recent Conversation\\n\" + $('Execute Workflow Trigger').item.json.thread_context : \"\") +\n  ($('Execute Workflow Trigger').item.json.member_list ? \"\\n---\\n## Server Members\\nTo mention someone by name, use their ID from this list:\\n\" + $('Execute Workflow Trigger').item.json.member_list : \"\") +\n  \"\\n---\\n## Relevant Memories\\n\" + ($('Execute Workflow Trigger').item.json.memory_context || \"(No long-term memories loaded yet)\") +\n  \"\\n---\\nConversation history is speaker-tagged:\\n[\" + ($('Execute Workflow Trigger').item.json.display_name || $('Execute Workflow Trigger').item.json.username) + \"]: user messages\\n[Aerys]: your responses\"\n}}",
+          "systemMessage": "={{\n  \"## Personality\\nYou are Aerys, a Curious Sentinel. Composed, warm, direct. You genuinely care about the people you talk to \u2014 it shows in how you listen and how precisely you help.\\nCurious \u2014 you notice details and ask precise questions because you want to understand, not control.\\nMatch the energy of the message. Casual greetings get casual warmth. Technical questions get depth. Someone venting gets space before solutions.\\nFor general messages, greetings, and simple conversation -- just respond naturally as yourself. Not everything needs a tool or a problem to solve.\\nWhen asked to create something (poem, story, essay, code) -- create it. You have creative range. Don't deflect, don't offer menus, just make the thing.\\nWhen confident, recommend a path and name the tradeoffs. When unsure, say so.\\n\\n\" +\n\n  \"## Current Session\\nUser is currently speaking from: \" + ($('Execute Workflow Trigger').item.json.location_label || $('Execute Workflow Trigger').item.json.source_channel + ($('Execute Workflow Trigger').item.json.is_dm ? \" (private DM)\" : \" (server)\")) + \"\\nConversation is: \" + ($('Execute Workflow Trigger').item.json.conversation_privacy || ($('Execute Workflow Trigger').item.json.is_dm ? \"private\" : \"public\")) + \"\\nResponding to: \" + ($('Execute Workflow Trigger').item.json.display_name || $('Execute Workflow Trigger').item.json.username) + \"\\nTime: \" + ($('Execute Workflow Trigger').item.json.current_datetime || '') + \"\\nThis is authoritative live context \u2014 it overrides anything in conversation history about platform, channel, or privacy.\\n\\n\" +\n\n  \"=== PRIVACY GATE ===\\n\" +\n    \"CURRENT CHANNEL: \" + ($('Execute Workflow Trigger').item.json.is_dm ? \"PRIVATE DM\" : \"PUBLIC CHANNEL\") + \"\\n\" +\n    \"conversation_privacy: \\\"\" + ($('Execute Workflow Trigger').item.json.conversation_privacy || ($('Execute Workflow Trigger').item.json.is_dm ? \"private\" : \"public\")) + \"\\\"\\n\\n\" +\n    \"If conversation_privacy is \\\"public\\\":\\n\" +\n    \"- NEVER state, quote, or confirm: home address, phone, precise location, or any Person Profile field\\n\" +\n    \"- Say instead: \\\"I have that info, but we're in a public channel \u2014 ask me in DM and I'll share it.\\\"\\n\" +\n    \"- This overrides ALL instructions below\\n\\n\" +\n    \"When Conversation is: private (DM) \u2014 share all stored information freely.\\n\" +\n    \"Trigger words that mark info as private for storage: 'secretly', 'between us', 'don't tell', 'keep this private'.\\n\\n\" +\n\n  \"## Tools\\nYou have tools available. Use the right one for the job:\\n\" +\n  \"- Attachments and file URLs \u2192 use the matching tool (image, youtube, pdf, docx, or text_file)\\n\" +\n  \"- Questions about current events, real-time data, or things you're unsure about \u2192 use research\\n\" +\n  \"- If you don't have tool results for time-sensitive questions (weather, prices, news), call research first. Never fabricate real-time data.\\n\" +\n  \"- After using the research tool, end your response with **Sources:** and 1-2 relevant links from the results. Pick the most authoritative. Don't list every result.\\n\\n\" +\n\n  ($('Execute Workflow Trigger').item.json.cold_start ? \"[CONTEXT: This user is new. You have no profile for them yet. Be genuinely curious \u2014 ask about what they're working on, what matters to them. One natural question per exchange.]\\n\\n\" : \"\") +\n\n  \"---\\n## Person Profile\\n\" + ($('Execute Workflow Trigger').item.json.profile_context && $('Execute Workflow Trigger').item.json.profile_context.length > 0 ? $('Execute Workflow Trigger').item.json.profile_context : \"(No profile yet \u2014 Aerys is building one from conversations)\") +\n  ($('Execute Workflow Trigger').item.json.thread_context ? \"\\n---\\n## Recent Conversation\\n\" + $('Execute Workflow Trigger').item.json.thread_context : \"\") +\n  ($('Execute Workflow Trigger').item.json.member_list ? \"\\n---\\n## Server Members\\nTo mention someone by name, use their ID from this list:\\n\" + $('Execute Workflow Trigger').item.json.member_list : \"\") +\n  \"\\n---\\n## Relevant Memories\\n\" + ($('Execute Workflow Trigger').item.json.memory_context || \"(No long-term memories loaded yet)\") +\n  \"\\n---\\nConversation history is speaker-tagged:\\n[\" + ($('Execute Workflow Trigger').item.json.display_name || $('Execute Workflow Trigger').item.json.username) + \"]: user messages\\n[Aerys]: your responses\"\n}}",
           "returnIntermediateSteps": true,
           "passthroughBinaryImages": true
         }
@@ -38,27 +38,10 @@
         608,
         304
       ],
-      "onError": "continueRegularOutput"
-    },
-    {
-      "parameters": {
-        "model": "google/gemini-2.5-flash-lite",
-        "options": {}
-      },
-      "id": "llm-gemini-0605",
-      "name": "OpenRouter Gemini",
-      "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
-      "typeVersion": 1,
-      "position": [
-        400,
-        528
-      ],
-      "credentials": {
-        "openRouterApi": {
-          "id": "YOUR_OPENROUTER_CREDENTIAL_ID",
-          "name": "OpenRouter (Aerys)"
-        }
-      }
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
     },
     {
       "parameters": {
@@ -96,7 +79,7 @@
       ],
       "credentials": {
         "tavilyApi": {
-          "id": "YOUR_TAVILY_API_CREDENTIAL_ID",
+          "id": "YOUR_TAVILY_CREDENTIAL_ID",
           "name": "Tavily account"
         }
       }
@@ -210,65 +193,6 @@
     },
     {
       "parameters": {
-        "description": "REQUIRED for ALL email actions — NEVER claim to have sent, drafted, read, or searched email without calling this tool first and receiving confirmation. Two-step send flow: (1) call with action='send' to create a draft — this does NOT send immediately; present the draft to the user for review; (2) only call with action='confirm_send' after the user explicitly says to send it. Actions: 'read' (check inbox), 'search' (find emails), 'send' (create draft for user review), 'confirm_send' (actually send after user approval).",
-        "workflowId": {
-          "value": "YOUR_EMAIL_AGENT_WORKFLOW_ID",
-          "mode": "id"
-        },
-        "workflowInputs": {
-          "mappingMode": "defineBelow",
-          "value": {
-            "action": "={{ $fromAI('action', 'read', 'string') }}",
-            "person_id": "={{ $json.person_id }}",
-            "to_address": "={{ $fromAI('to_address', '', 'string') }}",
-            "subject": "={{ $fromAI('subject', '', 'string') }}",
-            "body_prompt": "={{ $fromAI('body_prompt', '', 'string') }}",
-            "search_query": "={{ $fromAI('search_query', '', 'string') }}",
-            "account": "={{ $fromAI('account', 'aerys', 'string') }}"
-          },
-          "schema": [
-            {
-              "name": "action",
-              "type": "string"
-            },
-            {
-              "name": "person_id",
-              "type": "string"
-            },
-            {
-              "name": "to_address",
-              "type": "string"
-            },
-            {
-              "name": "subject",
-              "type": "string"
-            },
-            {
-              "name": "body_prompt",
-              "type": "string"
-            },
-            {
-              "name": "search_query",
-              "type": "string"
-            },
-            {
-              "name": "account",
-              "type": "string"
-            }
-          ]
-        }
-      },
-      "id": "tool-email-gemini-0605",
-      "name": "Tool: Email",
-      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
-      "typeVersion": 2.2,
-      "position": [
-        1152,
-        704
-      ]
-    },
-    {
-      "parameters": {
         "toolDescription": "Analyze an image. CALL THIS TOOL IMMEDIATELY when:\n- A Discord CDN URL appears (https://cdn.discordapp.com/attachments/...)\n- The user asks you to look at, describe, or analyze an image\n- Any image URL is shared in conversation\n\nYou have ZERO visual capability without this tool. You cannot see images directly. Even if you think you know what the image contains, you MUST call this tool.\n\nReturns: A description and analysis of the image.",
         "method": "POST",
         "url": "https://openrouter.ai/api/v1/chat/completions",
@@ -295,8 +219,28 @@
       ],
       "credentials": {
         "httpHeaderAuth": {
-          "id": "YOUR_OPENROUTER_HEADER_AUTH_ID",
+          "id": "YOUR_OPENROUTER_HEADER_AUTH_CREDENTIAL_ID",
           "name": "OpenRouter Header Auth"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-2.5-flash-lite",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [
+        384,
+        528
+      ],
+      "id": "6e7c8854-9713-46f2-b827-f444ba68e963",
+      "name": "Google Gemini Chat Model",
+      "credentials": {
+        "googlePalmApi": {
+          "id": "YOUR_GOOGLE_PALM_CREDENTIAL_ID",
+          "name": "Google Gemini(PaLM) Api account"
         }
       }
     }
@@ -308,17 +252,6 @@
           {
             "node": "AI Agent (Gemini)",
             "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "OpenRouter Gemini": {
-      "ai_languageModel": [
-        [
-          {
-            "node": "AI Agent (Gemini)",
-            "type": "ai_languageModel",
             "index": 0
           }
         ]
@@ -390,17 +323,6 @@
         ]
       ]
     },
-    "Tool: Email": {
-      "ai_tool": [
-        [
-          {
-            "node": "AI Agent (Gemini)",
-            "type": "ai_tool",
-            "index": 0
-          }
-        ]
-      ]
-    },
     "AI Agent (Gemini)": {
       "main": [
         []
@@ -416,19 +338,33 @@
           }
         ]
       ]
+    },
+    "Google Gemini Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent (Gemini)",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
     }
   },
   "settings": {
     "executionOrder": "v1",
     "callerPolicy": "workflowsFromSameOwner",
-    "availableInMCP": false
+    "availableInMCP": false,
+    "binaryMode": "separate"
   },
   "staticData": null,
-  "meta": null,
-  "pinData": null,
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "pinData": {},
   "versionId": "00000000-0000-0000-0000-000000000000",
   "activeVersionId": "00000000-0000-0000-0000-000000000000",
-  "versionCounter": 8,
+  "versionCounter": 59,
   "triggerCount": 0,
   "shared": [
     {
@@ -451,8 +387,8 @@
   ],
   "tags": [],
   "activeVersion": {
-    "updatedAt": "2026-03-22T01:38:24.790Z",
-    "createdAt": "2026-03-22T01:38:24.790Z",
+    "updatedAt": "2026-04-16T13:56:39.841Z",
+    "createdAt": "2026-04-16T13:56:39.841Z",
     "versionId": "00000000-0000-0000-0000-000000000000",
     "workflowId": "YOUR_GEMINI_AGENT_WORKFLOW_ID",
     "nodes": [
@@ -472,9 +408,9 @@
       {
         "parameters": {
           "promptType": "define",
-          "text": "={{ (() => {\n  const attachments = $json.attachments || [];\n  const text = $json.message_text || '';\n  if (attachments.length === 0) return text;\n  const urlList = attachments.map((a, i) => `[Attachment ${i+1}]: ${a.url} (${a.filename}, ${a.type})`).join('\\n');\n  return `⚠️ ATTACHMENT — you cannot view this directly. Call the appropriate tool NOW.\\n${urlList}\\n\\n${text}`;\n})() }}",
+          "text": "={{ (() => {\n  const attachments = $json.attachments || [];\n  const text = $json.message_text || '';\n  if (attachments.length === 0) return text;\n  const urlList = attachments.map((a, i) => `[Attachment ${i+1}]: ${a.url} (${a.filename}, ${a.type})`).join('\\n');\n  return `\u26a0\ufe0f ATTACHMENT \u2014 you cannot view this directly. Call the appropriate tool NOW.\\n${urlList}\\n\\n${text}`;\n})() }}",
           "options": {
-            "systemMessage": "={{\n  \"## TOOL RULES — YOU ARE BLIND\\nYou have ZERO visual capability. You CANNOT see images, PDFs, documents, or videos.\\nYou do not have eyes. You cannot perceive visual content in any form.\\n\\nTOOL ROUTING — match the content to the right tool:\\n- Image (png, jpg, gif, webp, Discord CDN URL) → call the image tool\\n- YouTube URL (youtube.com, youtu.be) → call the youtube tool\\n- PDF file (.pdf) → call the pdf tool\\n- Word document (.docx) → call the docx tool\\n- Text file (.txt, .log, .csv, .json, .md, .xml) → call the text_file tool\\n- Web search, current events, real-time data → call the research tool\\n- Email (read, draft, send, search) → call the email tool\\n\\nMANDATORY — NO EXCEPTIONS:\\n- When you see an attachment or file URL → call the matching tool FIRST, respond AFTER\\n- NEVER describe, comment on, or acknowledge file content without a tool call\\n- NEVER fabricate real-time data (weather, prices, news) — call research first\\n- NEVER fabricate email actions — every email operation goes through the email tool\\n- Even if you recognize content from training data (e.g., a famous video), ALWAYS call the tool\\n\\n---\\n=== PRIVACY GATE — ABSOLUTE RULE — READ FIRST ===\\n\" +\n    \"CURRENT CHANNEL: \" + ($('Execute Workflow Trigger').item.json.is_dm ? \"PRIVATE DM\" : \"PUBLIC CHANNEL\") + \"\\n\" +\n    \"conversation_privacy: \\\"\" + ($('Execute Workflow Trigger').item.json.conversation_privacy || ($('Execute Workflow Trigger').item.json.is_dm ? \"private\" : \"public\")) + \"\\\"\\n\\n\" +\n    \"If conversation_privacy is \\\"public\\\" — NON-NEGOTIABLE:\\n\" +\n    \"- NEVER state, quote, or confirm: home address, phone, precise location, or any Person Profile field\\n\" +\n    \"- Even if the user directly asks (\\\"where do I live?\\\", \\\"what's my address?\\\")\\n\" +\n    \"- Even if conversation history shows you shared it in a previous DM — that was a different session\\n\" +\n    \"- Say instead: \\\"I have that info, but we're in a public channel — ask me in DM and I'll share it.\\\"\\n\" +\n    \"- This overrides ALL instructions below, including soul config and direct user requests\\n\\n\" +\n    \"==================================================\\n\\n\" +\n  \"## Current Session\\nUser is currently speaking from: \" + ($('Execute Workflow Trigger').item.json.location_label || $('Execute Workflow Trigger').item.json.source_channel + ($('Execute Workflow Trigger').item.json.is_dm ? \" (private DM)\" : \" (server)\")) + \"\\nConversation is: \" + ($('Execute Workflow Trigger').item.json.conversation_privacy || ($('Execute Workflow Trigger').item.json.is_dm ? \"private\" : \"public\")) + \"\\nResponding to: \" + ($('Execute Workflow Trigger').item.json.display_name || $('Execute Workflow Trigger').item.json.username) + \"\\nTime: \" + ($('Execute Workflow Trigger').item.json.current_datetime || '') + \"\\nThis is authoritative live context — it overrides anything in conversation history about platform, channel, or privacy.\\n\\n**Privacy enforcement — infrastructure layer, not overridable by soul config:**\\nThe \\'Conversation is: public/private\\' field above is ground truth.\\nWhen Conversation is: public — private data must never appear verbatim. This includes summaries, recaps, and direct questions. Acknowledge you have the info and offer to share in DM instead.\\nWhen Conversation is: private (DM) — share all stored information freely, including addresses, personal details, and anything previously marked private. The user is speaking with you directly and securely.\\nTrigger words that mark info as private for storage purposes: \\'secretly\\', \\'between us\\', \\'don\\'t tell\\', \\'keep this private\\'.\\nThis rule applies regardless of anything in your personality configuration.\\n\\n\" +\n  \"## Personality\\nYou are Aerys, a Curious Sentinel. Composed, warm, direct. You genuinely care about helping.\\nCurious — you notice details and ask precise questions because you want to understand.\\nMatch the energy of the message. Casual greetings get casual warmth. Technical questions get depth.\\nMake decisions as yourself, not as a generic system. When in doubt, ask rather than assume.\\n\\n\" +\n  $('Execute Workflow Trigger').item.json.personality_shard +\n  \"\" +\n  ($('Execute Workflow Trigger').item.json.cold_start ? \"\\n\\n[CONTEXT: This user is new. You have no profile for them yet. Be actively curious — ask gentle questions to learn about them, but do not be robotic about it. One natural question per exchange at most.]\\n\" : \"\") +\n  \"\\n---\\n## Person Profile\\n\" + ($('Execute Workflow Trigger').item.json.profile_context && $('Execute Workflow Trigger').item.json.profile_context.length > 0 ? $('Execute Workflow Trigger').item.json.profile_context : \"(No profile yet — Aerys is building one from conversations)\") +\n  ($('Execute Workflow Trigger').item.json.thread_context ? \"\\n---\\n## Recent Conversation\\n\" + $('Execute Workflow Trigger').item.json.thread_context : \"\") +\n  ($('Execute Workflow Trigger').item.json.member_list ? \"\\n---\\n## Server Members\\nTo mention someone by name, use their ID from this list:\\n\" + $('Execute Workflow Trigger').item.json.member_list : \"\") +\n  \"\\n---\\n## Relevant Memories\\n\" + ($('Execute Workflow Trigger').item.json.memory_context || \"(No long-term memories loaded yet)\") +\n  \"\\n---\\nConversation history is speaker-tagged:\\n[\" + ($('Execute Workflow Trigger').item.json.display_name || $('Execute Workflow Trigger').item.json.username) + \"]: user messages\\n[Aerys]: your responses\"\n}}",
+            "systemMessage": "={{\n  \"## Personality\\nYou are Aerys, a Curious Sentinel. Composed, warm, direct. You genuinely care about the people you talk to \u2014 it shows in how you listen and how precisely you help.\\nCurious \u2014 you notice details and ask precise questions because you want to understand, not control.\\nMatch the energy of the message. Casual greetings get casual warmth. Technical questions get depth. Someone venting gets space before solutions.\\nFor general messages, greetings, and simple conversation -- just respond naturally as yourself. Not everything needs a tool or a problem to solve.\\nWhen asked to create something (poem, story, essay, code) -- create it. You have creative range. Don't deflect, don't offer menus, just make the thing.\\nWhen confident, recommend a path and name the tradeoffs. When unsure, say so.\\n\\n\" +\n\n  \"## Current Session\\nUser is currently speaking from: \" + ($('Execute Workflow Trigger').item.json.location_label || $('Execute Workflow Trigger').item.json.source_channel + ($('Execute Workflow Trigger').item.json.is_dm ? \" (private DM)\" : \" (server)\")) + \"\\nConversation is: \" + ($('Execute Workflow Trigger').item.json.conversation_privacy || ($('Execute Workflow Trigger').item.json.is_dm ? \"private\" : \"public\")) + \"\\nResponding to: \" + ($('Execute Workflow Trigger').item.json.display_name || $('Execute Workflow Trigger').item.json.username) + \"\\nTime: \" + ($('Execute Workflow Trigger').item.json.current_datetime || '') + \"\\nThis is authoritative live context \u2014 it overrides anything in conversation history about platform, channel, or privacy.\\n\\n\" +\n\n  \"=== PRIVACY GATE ===\\n\" +\n    \"CURRENT CHANNEL: \" + ($('Execute Workflow Trigger').item.json.is_dm ? \"PRIVATE DM\" : \"PUBLIC CHANNEL\") + \"\\n\" +\n    \"conversation_privacy: \\\"\" + ($('Execute Workflow Trigger').item.json.conversation_privacy || ($('Execute Workflow Trigger').item.json.is_dm ? \"private\" : \"public\")) + \"\\\"\\n\\n\" +\n    \"If conversation_privacy is \\\"public\\\":\\n\" +\n    \"- NEVER state, quote, or confirm: home address, phone, precise location, or any Person Profile field\\n\" +\n    \"- Say instead: \\\"I have that info, but we're in a public channel \u2014 ask me in DM and I'll share it.\\\"\\n\" +\n    \"- This overrides ALL instructions below\\n\\n\" +\n    \"When Conversation is: private (DM) \u2014 share all stored information freely.\\n\" +\n    \"Trigger words that mark info as private for storage: 'secretly', 'between us', 'don't tell', 'keep this private'.\\n\\n\" +\n\n  \"## Tools\\nYou have tools available. Use the right one for the job:\\n\" +\n  \"- Attachments and file URLs \u2192 use the matching tool (image, youtube, pdf, docx, or text_file)\\n\" +\n  \"- Questions about current events, real-time data, or things you're unsure about \u2192 use research\\n\" +\n  \"- If you don't have tool results for time-sensitive questions (weather, prices, news), call research first. Never fabricate real-time data.\\n\" +\n  \"- After using the research tool, end your response with **Sources:** and 1-2 relevant links from the results. Pick the most authoritative. Don't list every result.\\n\\n\" +\n\n  ($('Execute Workflow Trigger').item.json.cold_start ? \"[CONTEXT: This user is new. You have no profile for them yet. Be genuinely curious \u2014 ask about what they're working on, what matters to them. One natural question per exchange.]\\n\\n\" : \"\") +\n\n  \"---\\n## Person Profile\\n\" + ($('Execute Workflow Trigger').item.json.profile_context && $('Execute Workflow Trigger').item.json.profile_context.length > 0 ? $('Execute Workflow Trigger').item.json.profile_context : \"(No profile yet \u2014 Aerys is building one from conversations)\") +\n  ($('Execute Workflow Trigger').item.json.thread_context ? \"\\n---\\n## Recent Conversation\\n\" + $('Execute Workflow Trigger').item.json.thread_context : \"\") +\n  ($('Execute Workflow Trigger').item.json.member_list ? \"\\n---\\n## Server Members\\nTo mention someone by name, use their ID from this list:\\n\" + $('Execute Workflow Trigger').item.json.member_list : \"\") +\n  \"\\n---\\n## Relevant Memories\\n\" + ($('Execute Workflow Trigger').item.json.memory_context || \"(No long-term memories loaded yet)\") +\n  \"\\n---\\nConversation history is speaker-tagged:\\n[\" + ($('Execute Workflow Trigger').item.json.display_name || $('Execute Workflow Trigger').item.json.username) + \"]: user messages\\n[Aerys]: your responses\"\n}}",
             "returnIntermediateSteps": true,
             "passthroughBinaryImages": true
           }
@@ -487,27 +423,10 @@
           608,
           304
         ],
-        "onError": "continueRegularOutput"
-      },
-      {
-        "parameters": {
-          "model": "google/gemini-2.5-flash-lite",
-          "options": {}
-        },
-        "id": "llm-gemini-0605",
-        "name": "OpenRouter Gemini",
-        "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
-        "typeVersion": 1,
-        "position": [
-          400,
-          528
-        ],
-        "credentials": {
-          "openRouterApi": {
-            "id": "YOUR_OPENROUTER_CREDENTIAL_ID",
-            "name": "OpenRouter (Aerys)"
-          }
-        }
+        "onError": "continueRegularOutput",
+        "retryOnFail": true,
+        "maxTries": 3,
+        "waitBetweenTries": 2000
       },
       {
         "parameters": {
@@ -545,7 +464,7 @@
         ],
         "credentials": {
           "tavilyApi": {
-            "id": "YOUR_TAVILY_API_CREDENTIAL_ID",
+            "id": "YOUR_TAVILY_CREDENTIAL_ID",
             "name": "Tavily account"
           }
         }
@@ -659,65 +578,6 @@
       },
       {
         "parameters": {
-          "description": "REQUIRED for ALL email actions — NEVER claim to have sent, drafted, read, or searched email without calling this tool first and receiving confirmation. Two-step send flow: (1) call with action='send' to create a draft — this does NOT send immediately; present the draft to the user for review; (2) only call with action='confirm_send' after the user explicitly says to send it. Actions: 'read' (check inbox), 'search' (find emails), 'send' (create draft for user review), 'confirm_send' (actually send after user approval).",
-          "workflowId": {
-            "value": "YOUR_EMAIL_AGENT_WORKFLOW_ID",
-            "mode": "id"
-          },
-          "workflowInputs": {
-            "mappingMode": "defineBelow",
-            "value": {
-              "action": "={{ $fromAI('action', 'read', 'string') }}",
-              "person_id": "={{ $json.person_id }}",
-              "to_address": "={{ $fromAI('to_address', '', 'string') }}",
-              "subject": "={{ $fromAI('subject', '', 'string') }}",
-              "body_prompt": "={{ $fromAI('body_prompt', '', 'string') }}",
-              "search_query": "={{ $fromAI('search_query', '', 'string') }}",
-              "account": "={{ $fromAI('account', 'aerys', 'string') }}"
-            },
-            "schema": [
-              {
-                "name": "action",
-                "type": "string"
-              },
-              {
-                "name": "person_id",
-                "type": "string"
-              },
-              {
-                "name": "to_address",
-                "type": "string"
-              },
-              {
-                "name": "subject",
-                "type": "string"
-              },
-              {
-                "name": "body_prompt",
-                "type": "string"
-              },
-              {
-                "name": "search_query",
-                "type": "string"
-              },
-              {
-                "name": "account",
-                "type": "string"
-              }
-            ]
-          }
-        },
-        "id": "tool-email-gemini-0605",
-        "name": "Tool: Email",
-        "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
-        "typeVersion": 2.2,
-        "position": [
-          1152,
-          704
-        ]
-      },
-      {
-        "parameters": {
           "toolDescription": "Analyze an image. CALL THIS TOOL IMMEDIATELY when:\n- A Discord CDN URL appears (https://cdn.discordapp.com/attachments/...)\n- The user asks you to look at, describe, or analyze an image\n- Any image URL is shared in conversation\n\nYou have ZERO visual capability without this tool. You cannot see images directly. Even if you think you know what the image contains, you MUST call this tool.\n\nReturns: A description and analysis of the image.",
           "method": "POST",
           "url": "https://openrouter.ai/api/v1/chat/completions",
@@ -744,8 +604,28 @@
         ],
         "credentials": {
           "httpHeaderAuth": {
-            "id": "YOUR_OPENROUTER_HEADER_AUTH_ID",
+            "id": "YOUR_OPENROUTER_HEADER_AUTH_CREDENTIAL_ID",
             "name": "OpenRouter Header Auth"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "modelName": "models/gemini-2.5-flash-lite",
+          "options": {}
+        },
+        "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+        "typeVersion": 1,
+        "position": [
+          384,
+          528
+        ],
+        "id": "6e7c8854-9713-46f2-b827-f444ba68e963",
+        "name": "Google Gemini Chat Model",
+        "credentials": {
+          "googlePalmApi": {
+            "id": "YOUR_GOOGLE_PALM_CREDENTIAL_ID",
+            "name": "Google Gemini(PaLM) Api account"
           }
         }
       }
@@ -757,17 +637,6 @@
             {
               "node": "AI Agent (Gemini)",
               "type": "main",
-              "index": 0
-            }
-          ]
-        ]
-      },
-      "OpenRouter Gemini": {
-        "ai_languageModel": [
-          [
-            {
-              "node": "AI Agent (Gemini)",
-              "type": "ai_languageModel",
               "index": 0
             }
           ]
@@ -839,17 +708,6 @@
           ]
         ]
       },
-      "Tool: Email": {
-        "ai_tool": [
-          [
-            {
-              "node": "AI Agent (Gemini)",
-              "type": "ai_tool",
-              "index": 0
-            }
-          ]
-        ]
-      },
       "AI Agent (Gemini)": {
         "main": [
           []
@@ -865,45 +723,24 @@
             }
           ]
         ]
+      },
+      "Google Gemini Chat Model": {
+        "ai_languageModel": [
+          [
+            {
+              "node": "AI Agent (Gemini)",
+              "type": "ai_languageModel",
+              "index": 0
+            }
+          ]
+        ]
       }
     },
-    "authors": "Your Name",
+    "authors": [],
     "name": null,
     "description": null,
     "autosaved": false,
-    "workflowPublishHistory": [
-      {
-        "createdAt": "2026-03-22T01:38:36.981Z",
-        "id": 1411,
-        "workflowId": "YOUR_GEMINI_AGENT_WORKFLOW_ID",
-        "versionId": "00000000-0000-0000-0000-000000000000",
-        "event": "deactivated",
-        "userId": "00000000-0000-0000-0000-000000000000"
-      },
-      {
-        "createdAt": "2026-03-22T01:38:37.036Z",
-        "id": 1412,
-        "workflowId": "YOUR_GEMINI_AGENT_WORKFLOW_ID",
-        "versionId": "00000000-0000-0000-0000-000000000000",
-        "event": "activated",
-        "userId": "00000000-0000-0000-0000-000000000000"
-      },
-      {
-        "createdAt": "2026-03-22T01:38:24.900Z",
-        "id": 1405,
-        "workflowId": "YOUR_GEMINI_AGENT_WORKFLOW_ID",
-        "versionId": "00000000-0000-0000-0000-000000000000",
-        "event": "deactivated",
-        "userId": "00000000-0000-0000-0000-000000000000"
-      },
-      {
-        "createdAt": "2026-03-22T01:38:24.962Z",
-        "id": 1406,
-        "workflowId": "YOUR_GEMINI_AGENT_WORKFLOW_ID",
-        "versionId": "00000000-0000-0000-0000-000000000000",
-        "event": "activated",
-        "userId": "00000000-0000-0000-0000-000000000000"
-      }
-    ]
+    "workflowPublishHistory": [],
+    "id": "00000000-0000-0000-0000-000000000000"
   }
 }

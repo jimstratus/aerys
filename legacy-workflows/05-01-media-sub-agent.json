@@ -1,0 +1,2575 @@
+{
+  "updatedAt": "2026-01-01T00:00:00.000Z",
+  "createdAt": "2026-01-01T00:00:00.000Z",
+  "id": "05-01-media-sub-agent",
+  "name": "05-01 Media Agent",
+  "description": null,
+  "active": true,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "trigger-1",
+      "name": "Execute Workflow Trigger",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1,
+      "position": [
+        240,
+        304
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const input = $('Execute Workflow Trigger').first().json;\n\n// Parse attachments - may arrive as JSON string from toolWorkflow\nlet attachments = input.attachments || [];\nif (typeof attachments === 'string') {\n  try {\n    attachments = JSON.parse(attachments);\n  } catch(e) {\n    attachments = [];\n  }\n}\nif (!Array.isArray(attachments)) attachments = [];\n\nconst content = input.content || input.query || '';\nconst platform = input.platform || 'discord';\nconst context = input.context || '';\nconst messageContent = input.message_content || '';\n\nlet mediaType = 'unknown';\nlet mediaUrl = null;\nlet mediaUrls = [];  // For multi-image support\nlet videoId = null;\nlet filename = null;\nlet needsTelegramDownload = false;\nlet fileMimeType = null;\nlet telegramFileId = null;\n\n// Check attachments first\nif (attachments.length > 0) {\n  // Check first attachment for type classification\n  const att = attachments[0];\n\n  // Normalize content type - guild adapter stores as 'type', others use 'content_type'/'mime_type'\n  const ct = (att.content_type || att.mime_type || att.type || '').toLowerCase();\n  const fname = (att.filename || att.file_name || '').toLowerCase();\n\n  if (ct.startsWith('image/') || /\\.(jpg|jpeg|png|webp|gif)$/i.test(fname)) {\n    mediaType = 'image';\n    if (platform === 'telegram' || att.file_id) {\n      needsTelegramDownload = true;\n      telegramFileId = att.file_id;\n      fileMimeType = ct || 'image/jpeg';\n      mediaUrl = att.url || att.proxy_url;\n    } else {\n      mediaUrl = att.url || att.proxy_url;\n      // Collect ALL image attachment URLs for multi-image support\n      for (const a of attachments) {\n        const aCt = (a.content_type || a.mime_type || a.type || '').toLowerCase();\n        const aFname = (a.filename || a.file_name || '').toLowerCase();\n        if (aCt.startsWith('image/') || /\\.(jpg|jpeg|png|webp|gif)$/i.test(aFname)) {\n          const url = a.url || a.proxy_url;\n          if (url) mediaUrls.push(url);\n        }\n      }\n    }\n    filename = att.filename || att.file_name || 'image';\n  } else if (ct === 'application/pdf' || /\\.pdf$/i.test(fname)) {\n    mediaType = 'pdf';\n    mediaUrl = att.url || att.proxy_url;\n    filename = att.filename || att.file_name || 'document.pdf';\n  } else if (ct === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' || /\\.docx$/i.test(fname)) {\n    mediaType = 'docx';\n    mediaUrl = att.url || att.proxy_url;\n    filename = att.filename || att.file_name || 'document.docx';\n  } else if (ct === 'text/plain' || /\\.txt$/i.test(fname)) {\n    mediaType = 'txt';\n    mediaUrl = att.url || att.proxy_url;\n    filename = att.filename || att.file_name || 'document.txt';\n  }\n}\n\n// Check content for YouTube URL\nif (mediaType === 'unknown') {\n  const ytMatch = content.match(/(?:youtube\\.com\\/watch\\?v=|youtu\\.be\\/)([a-zA-Z0-9_-]{11})/);\n  if (ytMatch) {\n    mediaType = 'youtube';\n    videoId = ytMatch[1];\n  }\n}\n\n// Check context and message_content for YouTube URL\nfor (const field of [context, messageContent]) {\n  if (mediaType === 'unknown' && field) {\n    const ytMatch = field.match(/(?:youtube\\.com\\/watch\\?v=|youtu\\.be\\/)([a-zA-Z0-9_-]{11})/);\n    if (ytMatch) {\n      mediaType = 'youtube';\n      videoId = ytMatch[1];\n      break;\n    }\n  }\n}\n\n// Check query field for file URL - check document extensions BEFORE image catch-all\nif (mediaType === 'unknown' && input.query) {\n  const q = input.query;\n\n  // Also check query for YouTube URLs\n  const ytMatch = q.match(/(?:youtube\\.com\\/watch\\?v=|youtu\\.be\\/)([a-zA-Z0-9_-]{11})/);\n  if (ytMatch) {\n    mediaType = 'youtube';\n    videoId = ytMatch[1];\n  } else if (/\\.pdf(\\?|$)/i.test(q)) {\n    mediaType = 'pdf';\n    const urlMatch = q.match(/(https?:\\/\\/\\S+)/);\n    mediaUrl = urlMatch ? urlMatch[1] : q;\n    filename = (mediaUrl.split('/').pop() || 'document').split('?')[0];\n  } else if (/\\.docx(\\?|$)/i.test(q)) {\n    mediaType = 'docx';\n    const urlMatch = q.match(/(https?:\\/\\/\\S+)/);\n    mediaUrl = urlMatch ? urlMatch[1] : q;\n    filename = (mediaUrl.split('/').pop() || 'document').split('?')[0];\n  } else if (/\\.txt(\\?|$)/i.test(q)) {\n    mediaType = 'txt';\n    const urlMatch = q.match(/(https?:\\/\\/\\S+)/);\n    mediaUrl = urlMatch ? urlMatch[1] : q;\n    filename = (mediaUrl.split('/').pop() || 'document').split('?')[0];\n  } else if (/\\.(jpg|jpeg|png|gif|webp)(\\?|$)/i.test(q) || /cdn\\.discordapp\\.com\\/attachments\\//i.test(q)) {\n    // Image catch-all - Discord CDN URLs without a document extension\n    mediaType = 'image';\n    const urlMatch = q.match(/(https?:\\/\\/\\S+)/);\n    mediaUrl = urlMatch ? urlMatch[1] : q;\n    mediaUrls = [mediaUrl];\n    filename = (mediaUrl.split('/').pop() || 'image').split('?')[0];\n  }\n}\n\nreturn [{\n  json: {\n    mediaType,\n    mediaUrl,\n    mediaUrls,  // Array of all image URLs for multi-image\n    videoId,\n    filename,\n    needsTelegramDownload,\n    telegramFileId,\n    fileMimeType,\n    platform,\n    content,\n    context,\n    person_id: input.person_id,\n    source_channel: input.source_channel,\n    conversation_privacy: input.conversation_privacy\n  }\n}];\n"
+      },
+      "id": "detect-2",
+      "name": "Detect Media Type",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        464,
+        304
+      ]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict"
+                },
+                "combinator": "and",
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.mediaType }}",
+                    "rightValue": "image",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict"
+                },
+                "combinator": "and",
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.mediaType }}",
+                    "rightValue": "pdf",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict"
+                },
+                "combinator": "and",
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.mediaType }}",
+                    "rightValue": "docx",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict"
+                },
+                "combinator": "and",
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.mediaType }}",
+                    "rightValue": "txt",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict"
+                },
+                "combinator": "and",
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.mediaType }}",
+                    "rightValue": "youtube",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra"
+        }
+      },
+      "id": "switch-3",
+      "name": "Route by Media Type",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [
+        688,
+        304
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst input = $('Detect Media Type').first().json;\n\nconst VISION_MODELS = [\n  'anthropic/claude-sonnet-4.6',  // best vision + language quality\n  'google/gemini-2.5-pro',         // excellent vision, different provider\n  'openai/gpt-4o'                  // reliable fallback, third provider\n];\n\nconst VISION_SYSTEM_PROMPT = \"When an image contains text (screenshots, documents, chat logs, terminal output, code, error messages, etc.), transcribe ALL visible text verbatim first in a clearly marked section, then provide your analysis or description. If the image is purely visual with no text, describe it in detail.\";\n\n// Collect image URLs - prefer mediaUrls array for multi-image, fall back to single mediaUrl\nlet imageUrls = (input.mediaUrls && input.mediaUrls.length > 0) ? input.mediaUrls : [];\nif (imageUrls.length === 0 && input.mediaUrl) {\n  imageUrls = [input.mediaUrl];\n}\n\nconst imageCount = imageUrls.length;\nlet prompt = input.context || input.content || 'Describe this image in detail.';\nif (imageCount > 1) {\n  prompt = `There are ${imageCount} images attached. ${prompt}`;\n}\n\nreturn [{json: {\n  vision_models: VISION_MODELS,\n  current_model_index: 0,\n  prompt,\n  vision_system_prompt: VISION_SYSTEM_PROMPT,\n  imageUrl: imageUrls[0] || input.mediaUrl,  // Keep for backwards compat (Telegram path)\n  imageUrls,  // Full array for multi-image\n  imageCount,\n  platform: input.platform,\n  person_id: input.person_id,\n  content: input.content,\n  filename: input.filename,\n  mediaType: input.mediaType,\n  needsTelegramDownload: input.needsTelegramDownload,\n  telegramFileId: input.telegramFileId,\n  fileMimeType: input.fileMimeType,\n  max_tokens: 4096\n}}];\n"
+      },
+      "id": "build-vision-4a",
+      "name": "Build Vision Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        912,
+        112
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "leftValue": "={{ $json.needsTelegramDownload }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "check-tg-4b",
+      "name": "Check If Telegram Image",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1120,
+        112
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "file",
+        "operation": "getFile"
+      },
+      "id": "tg-get-file-4b",
+      "name": "Telegram Get File",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1344,
+        32
+      ],
+      "webhookId": "00000000-0000-0000-0000-000000000000",
+      "credentials": {
+        "telegramApi": {
+          "id": "YOUR_TELEGRAM_CREDENTIAL_ID",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "=https://api.telegram.org/file/bot{{ $('Telegram Get File').first().json.result.file_path }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file"
+            }
+          }
+        }
+      },
+      "id": "tg-download-4b",
+      "name": "Download Telegram File",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1568,
+        32
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "\n// Get the original vision request data\nconst visionData = $('Build Vision Request').first().json;\n\n// Get binary data from the downloaded file\n// n8n stores binary data in the items[0].binary object\nconst items = $input.all();\nconst item = items[0];\nconst binaryData = item.binary;\n\nif (!binaryData) {\n  // Fallback - cannot get binary data\n  return [{json: {\n    ...visionData,\n    imageUrl: null,\n    _telegramDownloadFailed: true\n  }}];\n}\n\nconst binaryKey = Object.keys(binaryData)[0];\nconst b64 = binaryData[binaryKey].data;\nconst mimeType = visionData.fileMimeType || 'image/jpeg';\n\nreturn [{json: {\n  ...visionData,\n  imageUrl: `data:${mimeType};base64,${b64}`\n}}];\n"
+      },
+      "id": "tg-b64-4b",
+      "name": "Convert Telegram File to Base64",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1792,
+        32
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst req = $json;\n// Build content array with text prompt + all image URLs\nconst content = [{type: 'text', text: req.prompt}];\n\nconst imageUrls = req.imageUrls || [];\nif (imageUrls.length > 0) {\n  for (const url of imageUrls) {\n    content.push({type: 'image_url', image_url: {url}});\n  }\n} else if (req.imageUrl) {\n  // Fallback to single imageUrl (Telegram base64 path)\n  content.push({type: 'image_url', image_url: {url: req.imageUrl}});\n}\n\nconst body = {\n  model: req.vision_models[0],\n  messages: [\n    {role: 'system', content: req.vision_system_prompt},\n    {role: 'user', content}\n  ],\n  max_tokens: req.max_tokens || 1024\n};\nreturn [{json: {\n  vision_request_body: JSON.stringify(body),\n  _vision_request: req\n}}];\n"
+      },
+      "id": "build-req1-4c",
+      "name": "Build Vision Req Model 1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1568,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://openrouter.ai/api/v1/chat/completions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ $json.vision_request_body }}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "call-vision-1-4c",
+      "name": "Call Vision Model 1",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1792,
+        192
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "YOUR_OPENROUTER_HEADER_AUTH_ID",
+          "name": "OpenRouter Header Auth"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst response = $input.first().json;\n// The Build Vision Req node embedded _vision_request - read from it\nlet req;\ntry {\n  req = $('Build Vision Req Model 1').first().json._vision_request;\n} catch(e) {\n  req = {vision_models: ['google/gemini-2.0-flash-exp:free', 'google/gemini-flash-1.5', 'anthropic/claude-3-haiku'], imageUrl: '', prompt: ''};\n}\n\nif (response && !response.error && response.choices && response.choices.length > 0) {\n  return [{json: {\n    vision_description: response.choices[0].message.content,\n    model_used: response.model || req.vision_models[0],\n    vision_error: false,\n    _vision_request: req\n  }}];\n}\n\nreturn [{json: {\n  _model1_failed: true,\n  _error1: (response && response.error && response.error.message) || (response && response.message) || 'No choices returned',\n  _vision_request: req\n}}];\n"
+      },
+      "id": "handle-v1-4d",
+      "name": "Handle Vision Model 1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2000,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "leftValue": "={{ $json._model1_failed }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "check-v1-4d",
+      "name": "Check Vision Model 1 Success",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        2224,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst req = $json;\n// Build content array with text prompt + all image URLs\nconst content = [{type: 'text', text: req.prompt}];\n\nconst imageUrls = req.imageUrls || [];\nif (imageUrls.length > 0) {\n  for (const url of imageUrls) {\n    content.push({type: 'image_url', image_url: {url}});\n  }\n} else if (req.imageUrl) {\n  // Fallback to single imageUrl (Telegram base64 path)\n  content.push({type: 'image_url', image_url: {url: req.imageUrl}});\n}\n\nconst body = {\n  model: req.vision_models[1],\n  messages: [\n    {role: 'system', content: req.vision_system_prompt},\n    {role: 'user', content}\n  ],\n  max_tokens: req.max_tokens || 1024\n};\nreturn [{json: {\n  vision_request_body: JSON.stringify(body),\n  _vision_request: req\n}}];\n"
+      },
+      "id": "build-req2-4c",
+      "name": "Build Vision Req Model 2",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2448,
+        112
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://openrouter.ai/api/v1/chat/completions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ $json.vision_request_body }}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "call-vision-2-4c",
+      "name": "Call Vision Model 2",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2672,
+        112
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "YOUR_OPENROUTER_HEADER_AUTH_ID",
+          "name": "OpenRouter Header Auth"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst response = $input.first().json;\nlet req;\ntry {\n  req = $('Build Vision Req Model 2').first().json._vision_request;\n} catch(e) {\n  try { req = $('Build Vision Req Model 1').first().json._vision_request; } catch(e2) { req = {}; }\n}\n\nif (response && !response.error && response.choices && response.choices.length > 0) {\n  return [{json: {\n    vision_description: response.choices[0].message.content,\n    model_used: response.model || (req.vision_models && req.vision_models[1]) || 'google/gemini-flash-1.5',\n    vision_error: false,\n    _vision_request: req\n  }}];\n}\n\nreturn [{json: {\n  _model2_failed: true,\n  _error2: (response && response.error && response.error.message) || 'No choices returned',\n  _vision_request: req\n}}];\n"
+      },
+      "id": "handle-v2-4d",
+      "name": "Handle Vision Model 2",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2880,
+        112
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "leftValue": "={{ $json._model2_failed }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "check-v2-4d",
+      "name": "Check Vision Model 2 Success",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        3104,
+        112
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst req = $json;\n// Build content array with text prompt + all image URLs\nconst content = [{type: 'text', text: req.prompt}];\n\nconst imageUrls = req.imageUrls || [];\nif (imageUrls.length > 0) {\n  for (const url of imageUrls) {\n    content.push({type: 'image_url', image_url: {url}});\n  }\n} else if (req.imageUrl) {\n  // Fallback to single imageUrl (Telegram base64 path)\n  content.push({type: 'image_url', image_url: {url: req.imageUrl}});\n}\n\nconst body = {\n  model: req.vision_models[2],\n  messages: [\n    {role: 'system', content: req.vision_system_prompt},\n    {role: 'user', content}\n  ],\n  max_tokens: req.max_tokens || 1024\n};\nreturn [{json: {\n  vision_request_body: JSON.stringify(body),\n  _vision_request: req\n}}];\n"
+      },
+      "id": "build-req3-4c",
+      "name": "Build Vision Req Model 3",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3328,
+        32
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://openrouter.ai/api/v1/chat/completions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ $json.vision_request_body }}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "call-vision-3-4c",
+      "name": "Call Vision Model 3",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3552,
+        32
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "YOUR_OPENROUTER_HEADER_AUTH_ID",
+          "name": "OpenRouter Header Auth"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst response = $input.first().json;\nlet req;\ntry {\n  req = $('Build Vision Req Model 3').first().json._vision_request;\n} catch(e) { req = {}; }\n\nif (response && !response.error && response.choices && response.choices.length > 0) {\n  return [{json: {\n    vision_description: response.choices[0].message.content,\n    model_used: response.model || (req.vision_models && req.vision_models[2]) || 'anthropic/claude-3-haiku',\n    vision_error: false,\n    _vision_request: req\n  }}];\n}\n\nreturn [{json: {\n  vision_description: null,\n  vision_error: true,\n  model_tried: (req.vision_models && req.vision_models[2]) || 'anthropic/claude-3-haiku',\n  _vision_request: req\n}}];\n"
+      },
+      "id": "handle-v3-4d",
+      "name": "Handle Vision Model 3",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3760,
+        32
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst detect = $('Detect Media Type').first().json;\nconst visionResult = $json;\n\nlet result;\nif (visionResult.vision_error || visionResult.vision_description === null) {\n  result = \"I tried to analyze that image but ran into trouble with the vision models right now. You might want to try again in a moment.\";\n} else {\n  result = visionResult.vision_description;\n}\n\nconst imageCount = (detect.mediaUrls && detect.mediaUrls.length > 0) ? detect.mediaUrls.length : 1;\n\nreturn [{json: {\n  result,\n  media_type: 'image',\n  filename: detect.filename || 'image',\n  model_used: visionResult.model_used || null,\n  image_count: imageCount\n}}];\n"
+      },
+      "id": "format-image-result",
+      "name": "Format Image Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3984,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.mediaUrl }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file"
+            }
+          }
+        }
+      },
+      "id": "download-pdf-5a",
+      "name": "Download PDF",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        912,
+        304
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "pdf",
+        "options": {}
+      },
+      "id": "extract-pdf-5b",
+      "name": "Extract PDF Text",
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1,
+      "position": [
+        1120,
+        304
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst detect = $('Detect Media Type').first().json;\n// Extract From File outputs text in $json.text\nlet text = $json.text || $json.data || '';\nif (typeof text !== 'string') text = String(text);\nif (text.length > 8000) {\n  text = text.substring(0, 8000) + '\\n\\n[Content truncated — showing first 8000 characters]';\n}\nreturn [{json: {\n  extracted_text: text,\n  media_type: 'pdf',\n  filename: detect.filename || 'document.pdf',\n  content: detect.content,\n  person_id: detect.person_id\n}}];\n"
+      },
+      "id": "truncate-pdf-5c",
+      "name": "Truncate PDF Text",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1344,
+        304
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.mediaUrl }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file"
+            }
+          }
+        }
+      },
+      "id": "download-docx-6a",
+      "name": "Download DOCX",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        912,
+        464
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "convert-docx-6b",
+      "name": "Convert DOCX to Text",
+      "type": "@mazix/n8n-nodes-converter-documents.convertFileToJson",
+      "typeVersion": 5,
+      "position": [
+        1120,
+        464
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const detect = $('Detect Media Type').first().json;\n// @mazix converter outputs text in files[0].text\nlet text = ($json.files && $json.files[0] && $json.files[0].text) || $json.text || $json.data || $json.content || $json.body || '';\nif (typeof text !== 'string') {\n  try { text = JSON.stringify(text); } catch(e) { text = String(text); }\n}\nif (text.length > 8000) {\n  text = text.substring(0, 8000) + '\\n\\n[Content truncated — showing first 8000 characters]';\n}\nreturn [{json: {\n  extracted_text: text,\n  media_type: 'docx',\n  filename: detect.filename || 'document.docx',\n  content: detect.content,\n  person_id: detect.person_id\n}}];\n"
+      },
+      "id": "truncate-docx-6c",
+      "name": "Truncate DOCX Text",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1344,
+        464
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.mediaUrl }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file"
+            }
+          }
+        }
+      },
+      "id": "download-txt-7a",
+      "name": "Download TXT",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        912,
+        624
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "text",
+        "options": {}
+      },
+      "id": "extract-txt",
+      "name": "Extract TXT Text",
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1,
+      "position": [
+        1120,
+        624
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst detect = $('Detect Media Type').first().json;\nlet text = $json.text || $json.data || '';\nif (typeof text !== 'string') text = String(text);\nif (text.length > 8000) {\n  text = text.substring(0, 8000) + '\\n\\n[Content truncated — showing first 8000 characters]';\n}\nreturn [{json: {\n  extracted_text: text,\n  media_type: 'txt',\n  filename: detect.filename || 'document.txt',\n  content: detect.content,\n  person_id: detect.person_id\n}}];\n"
+      },
+      "id": "truncate-txt-7b",
+      "name": "Truncate TXT",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1344,
+        624
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "\nreturn [{json: {\n  result: \"I received a file but I'm not sure how to process it. I can handle images (JPG, PNG, WEBP), documents (PDF, DOCX, TXT), and YouTube links — want to try one of those?\",\n  media_type: 'unknown',\n  filename: 'unknown'\n}}];\n"
+      },
+      "id": "unknown-result",
+      "name": "Unknown Media Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        912,
+        944
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst data = $json;\nconst isYoutube = data.is_youtube;\nconst filename = data.filename || 'document';\nconst content = data.content || '';\nconst extractedText = data.extracted_text || '';\n\nlet systemPrompt, userMessage;\n\nif (isYoutube) {\n  systemPrompt = \"You are Aerys. Summarize the following YouTube transcript for the user. Be natural and conversational, highlighting the key points. Use first person when appropriate.\";\n  userMessage = `Video: ${data.youtube_title || filename}\\n\\nTranscript:\\n${extractedText}`;\n} else {\n  systemPrompt = \"You are Aerys. Synthesize the following extracted content in response to the user's request. Be concise and natural. If the user asked a question, answer it using the content.\";\n  userMessage = content\n    ? `User asked: ${content}\\n\\nExtracted content from ${filename}:\\n${extractedText}`\n    : `Here is the extracted content from ${filename}:\\n${extractedText}`;\n}\n\nconst body = {\n  model: 'anthropic/claude-sonnet-4.6',\n  messages: [\n    {role: 'system', content: systemPrompt},\n    {role: 'user', content: userMessage}\n  ],\n  max_tokens: 2000\n};\n\nreturn [{json: {\n  synthesis_request_body: JSON.stringify(body),\n  _media_type: data.media_type,\n  _filename: filename,\n  _person_id: data.person_id\n}}];\n"
+      },
+      "id": "build-synth-req",
+      "name": "Build LLM Synthesis Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1568,
+        512
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://openrouter.ai/api/v1/chat/completions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ $json.synthesis_request_body }}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "call-synth-llm",
+      "name": "Call LLM Synthesis",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1792,
+        512
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "YOUR_OPENROUTER_HEADER_AUTH_ID",
+          "name": "OpenRouter Header Auth"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst response = $input.first().json;\nlet reqData;\ntry {\n  reqData = $('Build LLM Synthesis Request').item.json;\n} catch(e) {\n  reqData = {_media_type: 'document', _filename: 'document'};\n}\n\nlet result;\nif (response && !response.error && response.choices && response.choices.length > 0) {\n  result = response.choices[0].message.content;\n} else {\n  result = `I extracted the content from the ${reqData._media_type || 'document'} but had trouble synthesizing a response right now.`;\n}\n\nreturn [{json: {\n  result,\n  media_type: reqData._media_type || 'document',\n  filename: reqData._filename || 'document'\n}}];\n"
+      },
+      "id": "format-synth-result",
+      "name": "Format Synthesis Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2000,
+        512
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "\n// This node collects from all result paths\n// result field is already set\nconst data = $json;\nreturn [{json: {\n  result: data.result,\n  media_type: data.media_type,\n  filename: data.filename\n}}];\n"
+      },
+      "id": "format-return",
+      "name": "Format Return",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2224,
+        512
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst detect = $('Detect Media Type').first().json;\nconst videoUrl = 'https://www.youtube.com/watch?v=' + detect.videoId;\n\nconst body = JSON.stringify({\n  contents: [{\n    parts: [\n      {text: \"Summarize this YouTube video. Be natural and conversational, highlighting the key points, main ideas, and any important details. Give a thorough but readable summary.\"},\n      {file_data: {file_uri: videoUrl}}\n    ]\n  }],\n  generationConfig: {\n    maxOutputTokens: 8192\n  }\n});\n\nreturn [{json: {\n  requestBody: body,\n  videoId: detect.videoId,\n  content: detect.content,\n  person_id: detect.person_id\n}}];\n"
+      },
+      "id": "gemini-yt-request",
+      "name": "Build Gemini YouTube Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        544,
+        992
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ $json.requestBody }}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "call-gemini-yt",
+      "name": "Call Gemini YouTube",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        912,
+        1168
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "YOUR_GOOGLE_AI_CREDENTIAL_ID",
+          "name": "Google AI - Aerys"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst response = $json;\nconst req = $('Build Gemini YouTube Request').first().json;\n\nlet result;\nif (response.candidates && response.candidates[0]?.content?.parts?.[0]?.text) {\n  result = response.candidates[0].content.parts[0].text;\n} else if (response.error) {\n  result = `I wasn't able to pull up that video — ${response.error.message || 'something went wrong on my end'}.`;\n} else {\n  result = \"I wasn't able to process that video — it might be private, age-restricted, or not yet indexed.\";\n}\n\nreturn [{json: {\n  result,\n  media_type: 'youtube',\n  filename: 'youtube_video',\n  person_id: req.person_id\n}}];\n"
+      },
+      "id": "format-gemini-yt",
+      "name": "Format Gemini YouTube Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1216,
+        1120
+      ]
+    }
+  ],
+  "connections": {
+    "Execute Workflow Trigger": {
+      "main": [
+        [
+          {
+            "node": "Detect Media Type",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Detect Media Type": {
+      "main": [
+        [
+          {
+            "node": "Route by Media Type",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route by Media Type": {
+      "main": [
+        [
+          {
+            "node": "Build Vision Request",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Download PDF",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Download DOCX",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Download TXT",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Gemini YouTube Request",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Unknown Media Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Vision Request": {
+      "main": [
+        [
+          {
+            "node": "Check If Telegram Image",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check If Telegram Image": {
+      "main": [
+        [
+          {
+            "node": "Telegram Get File",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Vision Req Model 1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Telegram Get File": {
+      "main": [
+        [
+          {
+            "node": "Download Telegram File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download Telegram File": {
+      "main": [
+        [
+          {
+            "node": "Convert Telegram File to Base64",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Convert Telegram File to Base64": {
+      "main": [
+        [
+          {
+            "node": "Build Vision Req Model 1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Vision Req Model 1": {
+      "main": [
+        [
+          {
+            "node": "Call Vision Model 1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call Vision Model 1": {
+      "main": [
+        [
+          {
+            "node": "Handle Vision Model 1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Handle Vision Model 1": {
+      "main": [
+        [
+          {
+            "node": "Check Vision Model 1 Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Vision Model 1 Success": {
+      "main": [
+        [
+          {
+            "node": "Build Vision Req Model 2",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Format Image Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Vision Req Model 2": {
+      "main": [
+        [
+          {
+            "node": "Call Vision Model 2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call Vision Model 2": {
+      "main": [
+        [
+          {
+            "node": "Handle Vision Model 2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Handle Vision Model 2": {
+      "main": [
+        [
+          {
+            "node": "Check Vision Model 2 Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Vision Model 2 Success": {
+      "main": [
+        [
+          {
+            "node": "Build Vision Req Model 3",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Format Image Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Vision Req Model 3": {
+      "main": [
+        [
+          {
+            "node": "Call Vision Model 3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call Vision Model 3": {
+      "main": [
+        [
+          {
+            "node": "Handle Vision Model 3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Handle Vision Model 3": {
+      "main": [
+        [
+          {
+            "node": "Format Image Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Image Result": {
+      "main": [
+        [
+          {
+            "node": "Format Return",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download PDF": {
+      "main": [
+        [
+          {
+            "node": "Extract PDF Text",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract PDF Text": {
+      "main": [
+        [
+          {
+            "node": "Truncate PDF Text",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Truncate PDF Text": {
+      "main": [
+        [
+          {
+            "node": "Build LLM Synthesis Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download DOCX": {
+      "main": [
+        [
+          {
+            "node": "Convert DOCX to Text",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Convert DOCX to Text": {
+      "main": [
+        [
+          {
+            "node": "Truncate DOCX Text",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Truncate DOCX Text": {
+      "main": [
+        [
+          {
+            "node": "Build LLM Synthesis Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download TXT": {
+      "main": [
+        [
+          {
+            "node": "Extract TXT Text",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Truncate TXT": {
+      "main": [
+        [
+          {
+            "node": "Build LLM Synthesis Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Unknown Media Result": {
+      "main": [
+        [
+          {
+            "node": "Format Return",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build LLM Synthesis Request": {
+      "main": [
+        [
+          {
+            "node": "Call LLM Synthesis",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call LLM Synthesis": {
+      "main": [
+        [
+          {
+            "node": "Format Synthesis Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Synthesis Result": {
+      "main": [
+        [
+          {
+            "node": "Format Return",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract TXT Text": {
+      "main": [
+        [
+          {
+            "node": "Truncate TXT",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download Discord Image": {
+      "main": [
+        [
+          {
+            "node": "Convert Discord Image to Base64",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Convert Discord Image to Base64": {
+      "main": [
+        [
+          {
+            "node": "Build Vision Req Model 1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Gemini YouTube Request": {
+      "main": [
+        [
+          {
+            "node": "Call Gemini YouTube",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call Gemini YouTube": {
+      "main": [
+        [
+          {
+            "node": "Format Gemini YouTube Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Gemini YouTube Result": {
+      "main": [
+        [
+          {
+            "node": "Format Return",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  },
+  "staticData": null,
+  "meta": null,
+  "pinData": {},
+  "versionId": "00000000-0000-0000-0000-000000000000",
+  "activeVersionId": "00000000-0000-0000-0000-000000000000",
+  "versionCounter": 105,
+  "triggerCount": 0,
+  "shared": [
+    {
+      "updatedAt": "2026-03-03T01:27:46.384Z",
+      "createdAt": "2026-03-03T01:27:46.384Z",
+      "role": "workflow:owner",
+      "workflowId": "YOUR_MEDIA_AGENT_WORKFLOW_ID",
+      "projectId": "YOUR_N8N_PROJECT_ID",
+      "project": {
+        "updatedAt": "2026-01-01T00:00:00.000Z",
+        "createdAt": "2026-01-01T00:00:00.000Z",
+        "id": "YOUR_N8N_PROJECT_ID",
+        "name": "Your Project",
+        "type": "personal",
+        "icon": null,
+        "description": null,
+        "creatorId": "00000000-0000-0000-0000-000000000000"
+      }
+    }
+  ],
+  "tags": [],
+  "activeVersion": {
+    "updatedAt": "2026-03-11T19:31:18.606Z",
+    "createdAt": "2026-03-11T19:31:18.606Z",
+    "versionId": "00000000-0000-0000-0000-000000000000",
+    "workflowId": "YOUR_MEDIA_AGENT_WORKFLOW_ID",
+    "nodes": [
+      {
+        "parameters": {},
+        "id": "trigger-1",
+        "name": "Execute Workflow Trigger",
+        "type": "n8n-nodes-base.executeWorkflowTrigger",
+        "typeVersion": 1,
+        "position": [
+          240,
+          304
+        ]
+      },
+      {
+        "parameters": {
+          "jsCode": "const input = $('Execute Workflow Trigger').first().json;\n\n// Parse attachments - may arrive as JSON string from toolWorkflow\nlet attachments = input.attachments || [];\nif (typeof attachments === 'string') {\n  try {\n    attachments = JSON.parse(attachments);\n  } catch(e) {\n    attachments = [];\n  }\n}\nif (!Array.isArray(attachments)) attachments = [];\n\nconst content = input.content || input.query || '';\nconst platform = input.platform || 'discord';\nconst context = input.context || '';\nconst messageContent = input.message_content || '';\n\nlet mediaType = 'unknown';\nlet mediaUrl = null;\nlet mediaUrls = [];  // For multi-image support\nlet videoId = null;\nlet filename = null;\nlet needsTelegramDownload = false;\nlet fileMimeType = null;\nlet telegramFileId = null;\n\n// Check attachments first\nif (attachments.length > 0) {\n  // Check first attachment for type classification\n  const att = attachments[0];\n\n  // Normalize content type - guild adapter stores as 'type', others use 'content_type'/'mime_type'\n  const ct = (att.content_type || att.mime_type || att.type || '').toLowerCase();\n  const fname = (att.filename || att.file_name || '').toLowerCase();\n\n  if (ct.startsWith('image/') || /\\.(jpg|jpeg|png|webp|gif)$/i.test(fname)) {\n    mediaType = 'image';\n    if (platform === 'telegram' || att.file_id) {\n      needsTelegramDownload = true;\n      telegramFileId = att.file_id;\n      fileMimeType = ct || 'image/jpeg';\n      mediaUrl = att.url || att.proxy_url;\n    } else {\n      mediaUrl = att.url || att.proxy_url;\n      // Collect ALL image attachment URLs for multi-image support\n      for (const a of attachments) {\n        const aCt = (a.content_type || a.mime_type || a.type || '').toLowerCase();\n        const aFname = (a.filename || a.file_name || '').toLowerCase();\n        if (aCt.startsWith('image/') || /\\.(jpg|jpeg|png|webp|gif)$/i.test(aFname)) {\n          const url = a.url || a.proxy_url;\n          if (url) mediaUrls.push(url);\n        }\n      }\n    }\n    filename = att.filename || att.file_name || 'image';\n  } else if (ct === 'application/pdf' || /\\.pdf$/i.test(fname)) {\n    mediaType = 'pdf';\n    mediaUrl = att.url || att.proxy_url;\n    filename = att.filename || att.file_name || 'document.pdf';\n  } else if (ct === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' || /\\.docx$/i.test(fname)) {\n    mediaType = 'docx';\n    mediaUrl = att.url || att.proxy_url;\n    filename = att.filename || att.file_name || 'document.docx';\n  } else if (ct === 'text/plain' || /\\.txt$/i.test(fname)) {\n    mediaType = 'txt';\n    mediaUrl = att.url || att.proxy_url;\n    filename = att.filename || att.file_name || 'document.txt';\n  }\n}\n\n// Check content for YouTube URL\nif (mediaType === 'unknown') {\n  const ytMatch = content.match(/(?:youtube\\.com\\/watch\\?v=|youtu\\.be\\/)([a-zA-Z0-9_-]{11})/);\n  if (ytMatch) {\n    mediaType = 'youtube';\n    videoId = ytMatch[1];\n  }\n}\n\n// Check context and message_content for YouTube URL\nfor (const field of [context, messageContent]) {\n  if (mediaType === 'unknown' && field) {\n    const ytMatch = field.match(/(?:youtube\\.com\\/watch\\?v=|youtu\\.be\\/)([a-zA-Z0-9_-]{11})/);\n    if (ytMatch) {\n      mediaType = 'youtube';\n      videoId = ytMatch[1];\n      break;\n    }\n  }\n}\n\n// Check query field for file URL - check document extensions BEFORE image catch-all\nif (mediaType === 'unknown' && input.query) {\n  const q = input.query;\n\n  // Also check query for YouTube URLs\n  const ytMatch = q.match(/(?:youtube\\.com\\/watch\\?v=|youtu\\.be\\/)([a-zA-Z0-9_-]{11})/);\n  if (ytMatch) {\n    mediaType = 'youtube';\n    videoId = ytMatch[1];\n  } else if (/\\.pdf(\\?|$)/i.test(q)) {\n    mediaType = 'pdf';\n    const urlMatch = q.match(/(https?:\\/\\/\\S+)/);\n    mediaUrl = urlMatch ? urlMatch[1] : q;\n    filename = (mediaUrl.split('/').pop() || 'document').split('?')[0];\n  } else if (/\\.docx(\\?|$)/i.test(q)) {\n    mediaType = 'docx';\n    const urlMatch = q.match(/(https?:\\/\\/\\S+)/);\n    mediaUrl = urlMatch ? urlMatch[1] : q;\n    filename = (mediaUrl.split('/').pop() || 'document').split('?')[0];\n  } else if (/\\.txt(\\?|$)/i.test(q)) {\n    mediaType = 'txt';\n    const urlMatch = q.match(/(https?:\\/\\/\\S+)/);\n    mediaUrl = urlMatch ? urlMatch[1] : q;\n    filename = (mediaUrl.split('/').pop() || 'document').split('?')[0];\n  } else if (/\\.(jpg|jpeg|png|gif|webp)(\\?|$)/i.test(q) || /cdn\\.discordapp\\.com\\/attachments\\//i.test(q)) {\n    // Image catch-all - Discord CDN URLs without a document extension\n    mediaType = 'image';\n    const urlMatch = q.match(/(https?:\\/\\/\\S+)/);\n    mediaUrl = urlMatch ? urlMatch[1] : q;\n    mediaUrls = [mediaUrl];\n    filename = (mediaUrl.split('/').pop() || 'image').split('?')[0];\n  }\n}\n\nreturn [{\n  json: {\n    mediaType,\n    mediaUrl,\n    mediaUrls,  // Array of all image URLs for multi-image\n    videoId,\n    filename,\n    needsTelegramDownload,\n    telegramFileId,\n    fileMimeType,\n    platform,\n    content,\n    context,\n    person_id: input.person_id,\n    source_channel: input.source_channel,\n    conversation_privacy: input.conversation_privacy\n  }\n}];\n"
+        },
+        "id": "detect-2",
+        "name": "Detect Media Type",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          464,
+          304
+        ]
+      },
+      {
+        "parameters": {
+          "rules": {
+            "values": [
+              {
+                "conditions": {
+                  "options": {
+                    "caseSensitive": true,
+                    "leftValue": "",
+                    "typeValidation": "strict"
+                  },
+                  "combinator": "and",
+                  "conditions": [
+                    {
+                      "leftValue": "={{ $json.mediaType }}",
+                      "rightValue": "image",
+                      "operator": {
+                        "type": "string",
+                        "operation": "equals"
+                      }
+                    }
+                  ]
+                }
+              },
+              {
+                "conditions": {
+                  "options": {
+                    "caseSensitive": true,
+                    "leftValue": "",
+                    "typeValidation": "strict"
+                  },
+                  "combinator": "and",
+                  "conditions": [
+                    {
+                      "leftValue": "={{ $json.mediaType }}",
+                      "rightValue": "pdf",
+                      "operator": {
+                        "type": "string",
+                        "operation": "equals"
+                      }
+                    }
+                  ]
+                }
+              },
+              {
+                "conditions": {
+                  "options": {
+                    "caseSensitive": true,
+                    "leftValue": "",
+                    "typeValidation": "strict"
+                  },
+                  "combinator": "and",
+                  "conditions": [
+                    {
+                      "leftValue": "={{ $json.mediaType }}",
+                      "rightValue": "docx",
+                      "operator": {
+                        "type": "string",
+                        "operation": "equals"
+                      }
+                    }
+                  ]
+                }
+              },
+              {
+                "conditions": {
+                  "options": {
+                    "caseSensitive": true,
+                    "leftValue": "",
+                    "typeValidation": "strict"
+                  },
+                  "combinator": "and",
+                  "conditions": [
+                    {
+                      "leftValue": "={{ $json.mediaType }}",
+                      "rightValue": "txt",
+                      "operator": {
+                        "type": "string",
+                        "operation": "equals"
+                      }
+                    }
+                  ]
+                }
+              },
+              {
+                "conditions": {
+                  "options": {
+                    "caseSensitive": true,
+                    "leftValue": "",
+                    "typeValidation": "strict"
+                  },
+                  "combinator": "and",
+                  "conditions": [
+                    {
+                      "leftValue": "={{ $json.mediaType }}",
+                      "rightValue": "youtube",
+                      "operator": {
+                        "type": "string",
+                        "operation": "equals"
+                      }
+                    }
+                  ]
+                }
+              }
+            ]
+          },
+          "options": {
+            "fallbackOutput": "extra"
+          }
+        },
+        "id": "switch-3",
+        "name": "Route by Media Type",
+        "type": "n8n-nodes-base.switch",
+        "typeVersion": 3,
+        "position": [
+          688,
+          304
+        ]
+      },
+      {
+        "parameters": {
+          "jsCode": "\nconst input = $('Detect Media Type').first().json;\n\nconst VISION_MODELS = [\n  'anthropic/claude-sonnet-4.6',  // best vision + language quality\n  'google/gemini-2.5-pro',         // excellent vision, different provider\n  'openai/gpt-4o'                  // reliable fallback, third provider\n];\n\nconst VISION_SYSTEM_PROMPT = \"When an image contains text (screenshots, documents, chat logs, terminal output, code, error messages, etc.), transcribe ALL visible text verbatim first in a clearly marked section, then provide your analysis or description. If the image is purely visual with no text, describe it in detail.\";\n\n// Collect image URLs - prefer mediaUrls array for multi-image, fall back to single mediaUrl\nlet imageUrls = (input.mediaUrls && input.mediaUrls.length > 0) ? input.mediaUrls : [];\nif (imageUrls.length === 0 && input.mediaUrl) {\n  imageUrls = [input.mediaUrl];\n}\n\nconst imageCount = imageUrls.length;\nlet prompt = input.context || input.content || 'Describe this image in detail.';\nif (imageCount > 1) {\n  prompt = `There are ${imageCount} images attached. ${prompt}`;\n}\n\nreturn [{json: {\n  vision_models: VISION_MODELS,\n  current_model_index: 0,\n  prompt,\n  vision_system_prompt: VISION_SYSTEM_PROMPT,\n  imageUrl: imageUrls[0] || input.mediaUrl,  // Keep for backwards compat (Telegram path)\n  imageUrls,  // Full array for multi-image\n  imageCount,\n  platform: input.platform,\n  person_id: input.person_id,\n  content: input.content,\n  filename: input.filename,\n  mediaType: input.mediaType,\n  needsTelegramDownload: input.needsTelegramDownload,\n  telegramFileId: input.telegramFileId,\n  fileMimeType: input.fileMimeType,\n  max_tokens: 4096\n}}];\n"
+        },
+        "id": "build-vision-4a",
+        "name": "Build Vision Request",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          912,
+          112
+        ]
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "strict"
+            },
+            "combinator": "and",
+            "conditions": [
+              {
+                "leftValue": "={{ $json.needsTelegramDownload }}",
+                "rightValue": true,
+                "operator": {
+                  "type": "boolean",
+                  "operation": "equals"
+                }
+              }
+            ]
+          },
+          "options": {}
+        },
+        "id": "check-tg-4b",
+        "name": "Check If Telegram Image",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2,
+        "position": [
+          1120,
+          112
+        ]
+      },
+      {
+        "parameters": {
+          "resource": "file",
+          "operation": "getFile"
+        },
+        "id": "tg-get-file-4b",
+        "name": "Telegram Get File",
+        "type": "n8n-nodes-base.telegram",
+        "typeVersion": 1.2,
+        "position": [
+          1344,
+          32
+        ],
+        "webhookId": "00000000-0000-0000-0000-000000000000",
+        "credentials": {
+          "telegramApi": {
+            "id": "YOUR_TELEGRAM_CREDENTIAL_ID",
+            "name": "Telegram account"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "url": "=https://api.telegram.org/file/bot{{ $('Telegram Get File').first().json.result.file_path }}",
+          "options": {
+            "response": {
+              "response": {
+                "responseFormat": "file"
+              }
+            }
+          }
+        },
+        "id": "tg-download-4b",
+        "name": "Download Telegram File",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          1568,
+          32
+        ]
+      },
+      {
+        "parameters": {
+          "jsCode": "\n// Get the original vision request data\nconst visionData = $('Build Vision Request').first().json;\n\n// Get binary data from the downloaded file\n// n8n stores binary data in the items[0].binary object\nconst items = $input.all();\nconst item = items[0];\nconst binaryData = item.binary;\n\nif (!binaryData) {\n  // Fallback - cannot get binary data\n  return [{json: {\n    ...visionData,\n    imageUrl: null,\n    _telegramDownloadFailed: true\n  }}];\n}\n\nconst binaryKey = Object.keys(binaryData)[0];\nconst b64 = binaryData[binaryKey].data;\nconst mimeType = visionData.fileMimeType || 'image/jpeg';\n\nreturn [{json: {\n  ...visionData,\n  imageUrl: `data:${mimeType};base64,${b64}`\n}}];\n"
+        },
+        "id": "tg-b64-4b",
+        "name": "Convert Telegram File to Base64",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1792,
+          32
+        ]
+      },
+      {
+        "parameters": {
+          "jsCode": "\nconst req = $json;\n// Build content array with text prompt + all image URLs\nconst content = [{type: 'text', text: req.prompt}];\n\nconst imageUrls = req.imageUrls || [];\nif (imageUrls.length > 0) {\n  for (const url of imageUrls) {\n    content.push({type: 'image_url', image_url: {url}});\n  }\n} else if (req.imageUrl) {\n  // Fallback to single imageUrl (Telegram base64 path)\n  content.push({type: 'image_url', image_url: {url: req.imageUrl}});\n}\n\nconst body = {\n  model: req.vision_models[0],\n  messages: [\n    {role: 'system', content: req.vision_system_prompt},\n    {role: 'user', content}\n  ],\n  max_tokens: req.max_tokens || 1024\n};\nreturn [{json: {\n  vision_request_body: JSON.stringify(body),\n  _vision_request: req\n}}];\n"
+        },
+        "id": "build-req1-4c",
+        "name": "Build Vision Req Model 1",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1568,
+          192
+        ]
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "https://openrouter.ai/api/v1/chat/completions",
+          "authentication": "genericCredentialType",
+          "genericAuthType": "httpHeaderAuth",
+          "sendBody": true,
+          "contentType": "raw",
+          "rawContentType": "application/json",
+          "body": "={{ $json.vision_request_body }}",
+          "options": {
+            "response": {
+              "response": {
+                "neverError": true
+              }
+            }
+          }
+        },
+        "id": "call-vision-1-4c",
+        "name": "Call Vision Model 1",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          1792,
+          192
+        ],
+        "credentials": {
+          "httpHeaderAuth": {
+            "id": "YOUR_OPENROUTER_HEADER_AUTH_ID",
+            "name": "OpenRouter Header Auth"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "jsCode": "\nconst response = $input.first().json;\n// The Build Vision Req node embedded _vision_request - read from it\nlet req;\ntry {\n  req = $('Build Vision Req Model 1').first().json._vision_request;\n} catch(e) {\n  req = {vision_models: ['google/gemini-2.0-flash-exp:free', 'google/gemini-flash-1.5', 'anthropic/claude-3-haiku'], imageUrl: '', prompt: ''};\n}\n\nif (response && !response.error && response.choices && response.choices.length > 0) {\n  return [{json: {\n    vision_description: response.choices[0].message.content,\n    model_used: response.model || req.vision_models[0],\n    vision_error: false,\n    _vision_request: req\n  }}];\n}\n\nreturn [{json: {\n  _model1_failed: true,\n  _error1: (response && response.error && response.error.message) || (response && response.message) || 'No choices returned',\n  _vision_request: req\n}}];\n"
+        },
+        "id": "handle-v1-4d",
+        "name": "Handle Vision Model 1",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          2000,
+          192
+        ]
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "strict"
+            },
+            "combinator": "and",
+            "conditions": [
+              {
+                "leftValue": "={{ $json._model1_failed }}",
+                "rightValue": true,
+                "operator": {
+                  "type": "boolean",
+                  "operation": "equals"
+                }
+              }
+            ]
+          },
+          "options": {}
+        },
+        "id": "check-v1-4d",
+        "name": "Check Vision Model 1 Success",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2,
+        "position": [
+          2224,
+          192
+        ]
+      },
+      {
+        "parameters": {
+          "jsCode": "\nconst req = $json;\n// Build content array with text prompt + all image URLs\nconst content = [{type: 'text', text: req.prompt}];\n\nconst imageUrls = req.imageUrls || [];\nif (imageUrls.length > 0) {\n  for (const url of imageUrls) {\n    content.push({type: 'image_url', image_url: {url}});\n  }\n} else if (req.imageUrl) {\n  // Fallback to single imageUrl (Telegram base64 path)\n  content.push({type: 'image_url', image_url: {url: req.imageUrl}});\n}\n\nconst body = {\n  model: req.vision_models[1],\n  messages: [\n    {role: 'system', content: req.vision_system_prompt},\n    {role: 'user', content}\n  ],\n  max_tokens: req.max_tokens || 1024\n};\nreturn [{json: {\n  vision_request_body: JSON.stringify(body),\n  _vision_request: req\n}}];\n"
+        },
+        "id": "build-req2-4c",
+        "name": "Build Vision Req Model 2",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          2448,
+          112
+        ]
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "https://openrouter.ai/api/v1/chat/completions",
+          "authentication": "genericCredentialType",
+          "genericAuthType": "httpHeaderAuth",
+          "sendBody": true,
+          "contentType": "raw",
+          "rawContentType": "application/json",
+          "body": "={{ $json.vision_request_body }}",
+          "options": {
+            "response": {
+              "response": {
+                "neverError": true
+              }
+            }
+          }
+        },
+        "id": "call-vision-2-4c",
+        "name": "Call Vision Model 2",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          2672,
+          112
+        ],
+        "credentials": {
+          "httpHeaderAuth": {
+            "id": "YOUR_OPENROUTER_HEADER_AUTH_ID",
+            "name": "OpenRouter Header Auth"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "jsCode": "\nconst response = $input.first().json;\nlet req;\ntry {\n  req = $('Build Vision Req Model 2').first().json._vision_request;\n} catch(e) {\n  try { req = $('Build Vision Req Model 1').first().json._vision_request; } catch(e2) { req = {}; }\n}\n\nif (response && !response.error && response.choices && response.choices.length > 0) {\n  return [{json: {\n    vision_description: response.choices[0].message.content,\n    model_used: response.model || (req.vision_models && req.vision_models[1]) || 'google/gemini-flash-1.5',\n    vision_error: false,\n    _vision_request: req\n  }}];\n}\n\nreturn [{json: {\n  _model2_failed: true,\n  _error2: (response && response.error && response.error.message) || 'No choices returned',\n  _vision_request: req\n}}];\n"
+        },
+        "id": "handle-v2-4d",
+        "name": "Handle Vision Model 2",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          2880,
+          112
+        ]
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "strict"
+            },
+            "combinator": "and",
+            "conditions": [
+              {
+                "leftValue": "={{ $json._model2_failed }}",
+                "rightValue": true,
+                "operator": {
+                  "type": "boolean",
+                  "operation": "equals"
+                }
+              }
+            ]
+          },
+          "options": {}
+        },
+        "id": "check-v2-4d",
+        "name": "Check Vision Model 2 Success",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2,
+        "position": [
+          3104,
+          112
+        ]
+      },
+      {
+        "parameters": {
+          "jsCode": "\nconst req = $json;\n// Build content array with text prompt + all image URLs\nconst content = [{type: 'text', text: req.prompt}];\n\nconst imageUrls = req.imageUrls || [];\nif (imageUrls.length > 0) {\n  for (const url of imageUrls) {\n    content.push({type: 'image_url', image_url: {url}});\n  }\n} else if (req.imageUrl) {\n  // Fallback to single imageUrl (Telegram base64 path)\n  content.push({type: 'image_url', image_url: {url: req.imageUrl}});\n}\n\nconst body = {\n  model: req.vision_models[2],\n  messages: [\n    {role: 'system', content: req.vision_system_prompt},\n    {role: 'user', content}\n  ],\n  max_tokens: req.max_tokens || 1024\n};\nreturn [{json: {\n  vision_request_body: JSON.stringify(body),\n  _vision_request: req\n}}];\n"
+        },
+        "id": "build-req3-4c",
+        "name": "Build Vision Req Model 3",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          3328,
+          32
+        ]
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "https://openrouter.ai/api/v1/chat/completions",
+          "authentication": "genericCredentialType",
+          "genericAuthType": "httpHeaderAuth",
+          "sendBody": true,
+          "contentType": "raw",
+          "rawContentType": "application/json",
+          "body": "={{ $json.vision_request_body }}",
+          "options": {
+            "response": {
+              "response": {
+                "neverError": true
+              }
+            }
+          }
+        },
+        "id": "call-vision-3-4c",
+        "name": "Call Vision Model 3",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          3552,
+          32
+        ],
+        "credentials": {
+          "httpHeaderAuth": {
+            "id": "YOUR_OPENROUTER_HEADER_AUTH_ID",
+            "name": "OpenRouter Header Auth"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "jsCode": "\nconst response = $input.first().json;\nlet req;\ntry {\n  req = $('Build Vision Req Model 3').first().json._vision_request;\n} catch(e) { req = {}; }\n\nif (response && !response.error && response.choices && response.choices.length > 0) {\n  return [{json: {\n    vision_description: response.choices[0].message.content,\n    model_used: response.model || (req.vision_models && req.vision_models[2]) || 'anthropic/claude-3-haiku',\n    vision_error: false,\n    _vision_request: req\n  }}];\n}\n\nreturn [{json: {\n  vision_description: null,\n  vision_error: true,\n  model_tried: (req.vision_models && req.vision_models[2]) || 'anthropic/claude-3-haiku',\n  _vision_request: req\n}}];\n"
+        },
+        "id": "handle-v3-4d",
+        "name": "Handle Vision Model 3",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          3760,
+          32
+        ]
+      },
+      {
+        "parameters": {
+          "jsCode": "\nconst detect = $('Detect Media Type').first().json;\nconst visionResult = $json;\n\nlet result;\nif (visionResult.vision_error || visionResult.vision_description === null) {\n  result = \"I tried to analyze that image but ran into trouble with the vision models right now. You might want to try again in a moment.\";\n} else {\n  result = visionResult.vision_description;\n}\n\nconst imageCount = (detect.mediaUrls && detect.mediaUrls.length > 0) ? detect.mediaUrls.length : 1;\n\nreturn [{json: {\n  result,\n  media_type: 'image',\n  filename: detect.filename || 'image',\n  model_used: visionResult.model_used || null,\n  image_count: imageCount\n}}];\n"
+        },
+        "id": "format-image-result",
+        "name": "Format Image Result",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          3984,
+          192
+        ]
+      },
+      {
+        "parameters": {
+          "url": "={{ $json.mediaUrl }}",
+          "options": {
+            "response": {
+              "response": {
+                "responseFormat": "file"
+              }
+            }
+          }
+        },
+        "id": "download-pdf-5a",
+        "name": "Download PDF",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          912,
+          304
+        ]
+      },
+      {
+        "parameters": {
+          "operation": "pdf",
+          "options": {}
+        },
+        "id": "extract-pdf-5b",
+        "name": "Extract PDF Text",
+        "type": "n8n-nodes-base.extractFromFile",
+        "typeVersion": 1,
+        "position": [
+          1120,
+          304
+        ]
+      },
+      {
+        "parameters": {
+          "jsCode": "\nconst detect = $('Detect Media Type').first().json;\n// Extract From File outputs text in $json.text\nlet text = $json.text || $json.data || '';\nif (typeof text !== 'string') text = String(text);\nif (text.length > 8000) {\n  text = text.substring(0, 8000) + '\\n\\n[Content truncated — showing first 8000 characters]';\n}\nreturn [{json: {\n  extracted_text: text,\n  media_type: 'pdf',\n  filename: detect.filename || 'document.pdf',\n  content: detect.content,\n  person_id: detect.person_id\n}}];\n"
+        },
+        "id": "truncate-pdf-5c",
+        "name": "Truncate PDF Text",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1344,
+          304
+        ]
+      },
+      {
+        "parameters": {
+          "url": "={{ $json.mediaUrl }}",
+          "options": {
+            "response": {
+              "response": {
+                "responseFormat": "file"
+              }
+            }
+          }
+        },
+        "id": "download-docx-6a",
+        "name": "Download DOCX",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          912,
+          464
+        ]
+      },
+      {
+        "parameters": {},
+        "id": "convert-docx-6b",
+        "name": "Convert DOCX to Text",
+        "type": "@mazix/n8n-nodes-converter-documents.convertFileToJson",
+        "typeVersion": 5,
+        "position": [
+          1120,
+          464
+        ]
+      },
+      {
+        "parameters": {
+          "jsCode": "const detect = $('Detect Media Type').first().json;\n// @mazix converter outputs text in files[0].text\nlet text = ($json.files && $json.files[0] && $json.files[0].text) || $json.text || $json.data || $json.content || $json.body || '';\nif (typeof text !== 'string') {\n  try { text = JSON.stringify(text); } catch(e) { text = String(text); }\n}\nif (text.length > 8000) {\n  text = text.substring(0, 8000) + '\\n\\n[Content truncated — showing first 8000 characters]';\n}\nreturn [{json: {\n  extracted_text: text,\n  media_type: 'docx',\n  filename: detect.filename || 'document.docx',\n  content: detect.content,\n  person_id: detect.person_id\n}}];\n"
+        },
+        "id": "truncate-docx-6c",
+        "name": "Truncate DOCX Text",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1344,
+          464
+        ]
+      },
+      {
+        "parameters": {
+          "url": "={{ $json.mediaUrl }}",
+          "options": {
+            "response": {
+              "response": {
+                "responseFormat": "file"
+              }
+            }
+          }
+        },
+        "id": "download-txt-7a",
+        "name": "Download TXT",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          912,
+          624
+        ]
+      },
+      {
+        "parameters": {
+          "operation": "text",
+          "options": {}
+        },
+        "id": "extract-txt",
+        "name": "Extract TXT Text",
+        "type": "n8n-nodes-base.extractFromFile",
+        "typeVersion": 1,
+        "position": [
+          1120,
+          624
+        ]
+      },
+      {
+        "parameters": {
+          "jsCode": "\nconst detect = $('Detect Media Type').first().json;\nlet text = $json.text || $json.data || '';\nif (typeof text !== 'string') text = String(text);\nif (text.length > 8000) {\n  text = text.substring(0, 8000) + '\\n\\n[Content truncated — showing first 8000 characters]';\n}\nreturn [{json: {\n  extracted_text: text,\n  media_type: 'txt',\n  filename: detect.filename || 'document.txt',\n  content: detect.content,\n  person_id: detect.person_id\n}}];\n"
+        },
+        "id": "truncate-txt-7b",
+        "name": "Truncate TXT",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1344,
+          624
+        ]
+      },
+      {
+        "parameters": {
+          "jsCode": "\nreturn [{json: {\n  result: \"I received a file but I'm not sure how to process it. I can handle images (JPG, PNG, WEBP), documents (PDF, DOCX, TXT), and YouTube links — want to try one of those?\",\n  media_type: 'unknown',\n  filename: 'unknown'\n}}];\n"
+        },
+        "id": "unknown-result",
+        "name": "Unknown Media Result",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          912,
+          944
+        ]
+      },
+      {
+        "parameters": {
+          "jsCode": "\nconst data = $json;\nconst isYoutube = data.is_youtube;\nconst filename = data.filename || 'document';\nconst content = data.content || '';\nconst extractedText = data.extracted_text || '';\n\nlet systemPrompt, userMessage;\n\nif (isYoutube) {\n  systemPrompt = \"You are Aerys. Summarize the following YouTube transcript for the user. Be natural and conversational, highlighting the key points. Use first person when appropriate.\";\n  userMessage = `Video: ${data.youtube_title || filename}\\n\\nTranscript:\\n${extractedText}`;\n} else {\n  systemPrompt = \"You are Aerys. Synthesize the following extracted content in response to the user's request. Be concise and natural. If the user asked a question, answer it using the content.\";\n  userMessage = content\n    ? `User asked: ${content}\\n\\nExtracted content from ${filename}:\\n${extractedText}`\n    : `Here is the extracted content from ${filename}:\\n${extractedText}`;\n}\n\nconst body = {\n  model: 'anthropic/claude-sonnet-4.6',\n  messages: [\n    {role: 'system', content: systemPrompt},\n    {role: 'user', content: userMessage}\n  ],\n  max_tokens: 2000\n};\n\nreturn [{json: {\n  synthesis_request_body: JSON.stringify(body),\n  _media_type: data.media_type,\n  _filename: filename,\n  _person_id: data.person_id\n}}];\n"
+        },
+        "id": "build-synth-req",
+        "name": "Build LLM Synthesis Request",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1568,
+          512
+        ]
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "https://openrouter.ai/api/v1/chat/completions",
+          "authentication": "genericCredentialType",
+          "genericAuthType": "httpHeaderAuth",
+          "sendBody": true,
+          "contentType": "raw",
+          "rawContentType": "application/json",
+          "body": "={{ $json.synthesis_request_body }}",
+          "options": {
+            "response": {
+              "response": {
+                "neverError": true
+              }
+            }
+          }
+        },
+        "id": "call-synth-llm",
+        "name": "Call LLM Synthesis",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          1792,
+          512
+        ],
+        "credentials": {
+          "httpHeaderAuth": {
+            "id": "YOUR_OPENROUTER_HEADER_AUTH_ID",
+            "name": "OpenRouter Header Auth"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "jsCode": "\nconst response = $input.first().json;\nlet reqData;\ntry {\n  reqData = $('Build LLM Synthesis Request').item.json;\n} catch(e) {\n  reqData = {_media_type: 'document', _filename: 'document'};\n}\n\nlet result;\nif (response && !response.error && response.choices && response.choices.length > 0) {\n  result = response.choices[0].message.content;\n} else {\n  result = `I extracted the content from the ${reqData._media_type || 'document'} but had trouble synthesizing a response right now.`;\n}\n\nreturn [{json: {\n  result,\n  media_type: reqData._media_type || 'document',\n  filename: reqData._filename || 'document'\n}}];\n"
+        },
+        "id": "format-synth-result",
+        "name": "Format Synthesis Result",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          2000,
+          512
+        ]
+      },
+      {
+        "parameters": {
+          "jsCode": "\n// This node collects from all result paths\n// result field is already set\nconst data = $json;\nreturn [{json: {\n  result: data.result,\n  media_type: data.media_type,\n  filename: data.filename\n}}];\n"
+        },
+        "id": "format-return",
+        "name": "Format Return",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          2224,
+          512
+        ]
+      },
+      {
+        "parameters": {
+          "jsCode": "\nconst detect = $('Detect Media Type').first().json;\nconst videoUrl = 'https://www.youtube.com/watch?v=' + detect.videoId;\n\nconst body = JSON.stringify({\n  contents: [{\n    parts: [\n      {text: \"Summarize this YouTube video. Be natural and conversational, highlighting the key points, main ideas, and any important details. Give a thorough but readable summary.\"},\n      {file_data: {file_uri: videoUrl}}\n    ]\n  }],\n  generationConfig: {\n    maxOutputTokens: 8192\n  }\n});\n\nreturn [{json: {\n  requestBody: body,\n  videoId: detect.videoId,\n  content: detect.content,\n  person_id: detect.person_id\n}}];\n"
+        },
+        "id": "gemini-yt-request",
+        "name": "Build Gemini YouTube Request",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          544,
+          992
+        ]
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",
+          "authentication": "genericCredentialType",
+          "genericAuthType": "httpHeaderAuth",
+          "sendBody": true,
+          "contentType": "raw",
+          "rawContentType": "application/json",
+          "body": "={{ $json.requestBody }}",
+          "options": {
+            "response": {
+              "response": {
+                "neverError": true
+              }
+            }
+          }
+        },
+        "id": "call-gemini-yt",
+        "name": "Call Gemini YouTube",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          912,
+          1168
+        ],
+        "credentials": {
+          "httpHeaderAuth": {
+            "id": "YOUR_GOOGLE_AI_CREDENTIAL_ID",
+            "name": "Google AI - Aerys"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "jsCode": "\nconst response = $json;\nconst req = $('Build Gemini YouTube Request').first().json;\n\nlet result;\nif (response.candidates && response.candidates[0]?.content?.parts?.[0]?.text) {\n  result = response.candidates[0].content.parts[0].text;\n} else if (response.error) {\n  result = `I wasn't able to pull up that video — ${response.error.message || 'something went wrong on my end'}.`;\n} else {\n  result = \"I wasn't able to process that video — it might be private, age-restricted, or not yet indexed.\";\n}\n\nreturn [{json: {\n  result,\n  media_type: 'youtube',\n  filename: 'youtube_video',\n  person_id: req.person_id\n}}];\n"
+        },
+        "id": "format-gemini-yt",
+        "name": "Format Gemini YouTube Result",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1216,
+          1120
+        ]
+      }
+    ],
+    "connections": {
+      "Execute Workflow Trigger": {
+        "main": [
+          [
+            {
+              "node": "Detect Media Type",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Detect Media Type": {
+        "main": [
+          [
+            {
+              "node": "Route by Media Type",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Route by Media Type": {
+        "main": [
+          [
+            {
+              "node": "Build Vision Request",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Download PDF",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Download DOCX",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Download TXT",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Build Gemini YouTube Request",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Unknown Media Result",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Build Vision Request": {
+        "main": [
+          [
+            {
+              "node": "Check If Telegram Image",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Check If Telegram Image": {
+        "main": [
+          [
+            {
+              "node": "Telegram Get File",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Build Vision Req Model 1",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Telegram Get File": {
+        "main": [
+          [
+            {
+              "node": "Download Telegram File",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Download Telegram File": {
+        "main": [
+          [
+            {
+              "node": "Convert Telegram File to Base64",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Convert Telegram File to Base64": {
+        "main": [
+          [
+            {
+              "node": "Build Vision Req Model 1",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Build Vision Req Model 1": {
+        "main": [
+          [
+            {
+              "node": "Call Vision Model 1",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Call Vision Model 1": {
+        "main": [
+          [
+            {
+              "node": "Handle Vision Model 1",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Handle Vision Model 1": {
+        "main": [
+          [
+            {
+              "node": "Check Vision Model 1 Success",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Check Vision Model 1 Success": {
+        "main": [
+          [
+            {
+              "node": "Build Vision Req Model 2",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Format Image Result",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Build Vision Req Model 2": {
+        "main": [
+          [
+            {
+              "node": "Call Vision Model 2",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Call Vision Model 2": {
+        "main": [
+          [
+            {
+              "node": "Handle Vision Model 2",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Handle Vision Model 2": {
+        "main": [
+          [
+            {
+              "node": "Check Vision Model 2 Success",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Check Vision Model 2 Success": {
+        "main": [
+          [
+            {
+              "node": "Build Vision Req Model 3",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Format Image Result",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Build Vision Req Model 3": {
+        "main": [
+          [
+            {
+              "node": "Call Vision Model 3",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Call Vision Model 3": {
+        "main": [
+          [
+            {
+              "node": "Handle Vision Model 3",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Handle Vision Model 3": {
+        "main": [
+          [
+            {
+              "node": "Format Image Result",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Format Image Result": {
+        "main": [
+          [
+            {
+              "node": "Format Return",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Download PDF": {
+        "main": [
+          [
+            {
+              "node": "Extract PDF Text",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Extract PDF Text": {
+        "main": [
+          [
+            {
+              "node": "Truncate PDF Text",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Truncate PDF Text": {
+        "main": [
+          [
+            {
+              "node": "Build LLM Synthesis Request",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Download DOCX": {
+        "main": [
+          [
+            {
+              "node": "Convert DOCX to Text",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Convert DOCX to Text": {
+        "main": [
+          [
+            {
+              "node": "Truncate DOCX Text",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Truncate DOCX Text": {
+        "main": [
+          [
+            {
+              "node": "Build LLM Synthesis Request",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Download TXT": {
+        "main": [
+          [
+            {
+              "node": "Extract TXT Text",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Truncate TXT": {
+        "main": [
+          [
+            {
+              "node": "Build LLM Synthesis Request",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Unknown Media Result": {
+        "main": [
+          [
+            {
+              "node": "Format Return",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Build LLM Synthesis Request": {
+        "main": [
+          [
+            {
+              "node": "Call LLM Synthesis",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Call LLM Synthesis": {
+        "main": [
+          [
+            {
+              "node": "Format Synthesis Result",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Format Synthesis Result": {
+        "main": [
+          [
+            {
+              "node": "Format Return",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Extract TXT Text": {
+        "main": [
+          [
+            {
+              "node": "Truncate TXT",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Download Discord Image": {
+        "main": [
+          [
+            {
+              "node": "Convert Discord Image to Base64",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Convert Discord Image to Base64": {
+        "main": [
+          [
+            {
+              "node": "Build Vision Req Model 1",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Build Gemini YouTube Request": {
+        "main": [
+          [
+            {
+              "node": "Call Gemini YouTube",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Call Gemini YouTube": {
+        "main": [
+          [
+            {
+              "node": "Format Gemini YouTube Result",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Format Gemini YouTube Result": {
+        "main": [
+          [
+            {
+              "node": "Format Return",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "authors": "Your Name",
+    "name": null,
+    "description": null,
+    "autosaved": false,
+    "workflowPublishHistory": [
+      {
+        "createdAt": "2026-03-11T19:31:18.777Z",
+        "id": 1214,
+        "workflowId": "YOUR_MEDIA_AGENT_WORKFLOW_ID",
+        "versionId": "00000000-0000-0000-0000-000000000000",
+        "event": "deactivated",
+        "userId": "00000000-0000-0000-0000-000000000000"
+      },
+      {
+        "createdAt": "2026-03-11T19:31:18.842Z",
+        "id": 1215,
+        "workflowId": "YOUR_MEDIA_AGENT_WORKFLOW_ID",
+        "versionId": "00000000-0000-0000-0000-000000000000",
+        "event": "activated",
+        "userId": "00000000-0000-0000-0000-000000000000"
+      }
+    ]
+  }
+}
