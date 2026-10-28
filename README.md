@@ -1,5 +1,17 @@
 # Aerys
 
+> **Status, October 2026: this is the V1 archive.** Aerys ran on the n8n design described below until July 2026. On 2026-07-11 she moved to a ground-up Python/LangGraph rebuild, and that's where she lives and grows now: **[Aerys-V2](https://github.com/sira-fiinikkusu/Aerys-V2)**. This repo stays up as the record of how V1 worked.
+>
+> Where the [V2 roadmap](#v2-roadmap) below ended up:
+> - **Voice:** shipped. Home Assistant voice satellites in three rooms answer to her own custom wake words.
+> - **Capability request loop:** shipped. She logs what she couldn't do, and the gaps go to the owner's review board.
+> - **Hardware evolution:** shipped. She runs on a Jetson Orin Nano at home.
+> - **Heartbeat:** partly. She runs scheduled check-ins and sends proactive storm and rain heads-ups.
+> - **Task management:** partly, as list and note tools.
+> - **Distribution ("Aerys Core"):** not yet.
+>
+> She also has a face now: an animated portrait on a desk panel that follows her mood.
+
 A contextually-aware personal AI assistant built on n8n with persistent memory, multi-platform messaging, and per-tier model routing.
 
 Aerys processes messages across Discord, Telegram, and Gmail through a pipeline of identity resolution, memory retrieval, intent classification, and personality-consistent response generation. The system uses 27 interconnected n8n workflows spanning adapters, memory, identity, sub-agents, and observability --- built over 7 development phases across 5 weeks.
